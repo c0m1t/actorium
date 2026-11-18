@@ -1,6 +1,6 @@
 {
   "name": "@actorium/xstate-otel",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "OpenTelemetry tracing for long-lived XState v5 actor systems",
   "keywords": [
     "xstate",
