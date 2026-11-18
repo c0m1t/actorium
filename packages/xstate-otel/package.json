@@ -1,0 +1,64 @@
+{
+  "name": "@actorium/xstate-otel",
+  "version": "0.0.0",
+  "description": "OpenTelemetry tracing for long-lived XState v5 actor systems",
+  "keywords": [
+    "xstate",
+    "opentelemetry",
+    "otel",
+    "tracing",
+    "observability",
+    "actors",
+    "state-machine"
+  ],
+  "homepage": "https://c0m1t.github.io/actorium/xstate-otel/",
+  "bugs": {
+    "url": "https://github.com/c0m1t/actorium/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/c0m1t/actorium.git",
+    "directory": "packages/xstate-otel"
+  },
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node --eval \"fs.rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
+    "check:package": "node scripts/check-package.mjs",
+    "prepack": "pnpm run build",
+    "test": "vitest run",
+    "test:compatibility": "node scripts/check-compatibility.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": ">=1.9.0 <2",
+    "xstate": ">=5.33.0 <6"
+  },
+  "devDependencies": {
+    "@opentelemetry/api": "catalog:",
+    "@opentelemetry/context-async-hooks": "catalog:",
+    "@opentelemetry/sdk-trace-base": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "xstate": "catalog:"
+  }
+}

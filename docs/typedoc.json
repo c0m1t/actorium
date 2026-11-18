@@ -1,0 +1,23 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "@actorium/xstate-otel",
+  "entryPoints": ["../packages/xstate-otel/src/index.ts"],
+  "tsconfig": "../packages/xstate-otel/tsconfig.build.json",
+  "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],
+  "out": "xstate-otel/api",
+  "docsRoot": ".",
+  "readme": "none",
+  "entryFileName": "index.md",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "hidePageHeader": true,
+  "displayBasePath": "../packages/xstate-otel/src",
+  "sidebar": {
+    "autoConfiguration": true,
+    "format": "vitepress",
+    "pretty": false,
+    "collapsed": true
+  },
+  "intentionallyNotExported": ["names"],
+  "treatWarningsAsErrors": true
+}

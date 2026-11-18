@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/c0m1t/actorium/security/advisories/new
+    about: Report vulnerabilities privately, not in a public issue.
+  - name: Documentation
+    url: https://c0m1t.github.io/actorium/
+    about: Guides, recipes and API reference.

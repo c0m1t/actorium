@@ -1,0 +1,48 @@
+name: Bug report
+description: Something traces incorrectly, fails or changes actor behaviour.
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead (spans, attributes, errors).
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: A minimal machine and the calls that show the problem, or a link to a repository.
+      render: ts
+    validations:
+      required: true
+  - type: input
+    id: xstate-otel-version
+    attributes:
+      label: '@actorium/xstate-otel version'
+    validations:
+      required: true
+  - type: input
+    id: xstate-version
+    attributes:
+      label: xstate version
+    validations:
+      required: true
+  - type: input
+    id: otel-api-version
+    attributes:
+      label: '@opentelemetry/api version'
+    validations:
+      required: true
+  - type: input
+    id: otel-sdk-version
+    attributes:
+      label: OpenTelemetry SDK packages and versions
+      placeholder: '@opentelemetry/sdk-trace-base 2.12.1'
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+    validations:
+      required: true

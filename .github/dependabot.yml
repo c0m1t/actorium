@@ -1,0 +1,33 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # Matches minimumReleaseAge in pnpm-workspace.yaml.
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      opentelemetry:
+        patterns: ['@opentelemetry/*']
+      xstate:
+        patterns: [xstate]
+      tooling:
+        patterns: ['*']
+        exclude-patterns: ['@opentelemetry/*', xstate]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ['*']

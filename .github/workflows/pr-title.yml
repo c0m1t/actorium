@@ -1,0 +1,67 @@
+name: PR title
+
+on:
+  # pull_request_target so the check also runs for forks. It reads only the
+  # title from the event and never checks out pull request code.
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+  # release.yml dispatches this for release PRs, whose GITHUB_TOKEN pushes
+  # trigger no other workflow.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Number of the pull request whose title to check
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+# The squash-merged title becomes the changelog entry; keep the types in sync
+# with CONTRIBUTING.md.
+env:
+  TYPES: |
+    feat
+    fix
+    perf
+    docs
+    refactor
+    test
+    build
+    ci
+    chore
+
+jobs:
+  conventional-commit:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - if: github.event_name == 'pull_request_target'
+        uses: amannn/action-semantic-pull-request@2252a14e810aa9b85c2d560bd7070c802206ecf6 # v6.1.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: ${{ env.TYPES }}
+      # The check run lands on the dispatched commit, so it must be the
+      # pull request's head; the title is read from the pull request itself.
+      - if: github.event_name == 'workflow_dispatch'
+        name: Check the release pull request title
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr }}
+        run: |
+          read -r head title < <(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" \
+            --json headRefOid,title --jq '[.headRefOid, .title] | @tsv')
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "::error::Pull request #$PR is at $head, not the dispatched commit $GITHUB_SHA"
+            exit 1
+          fi
+          types=$(printf '%s\n' "$TYPES" | sed '/^$/d' | paste -sd '|')
+          if ! printf '%s\n' "$title" | grep -Eq "^($types)(\([^()]+\))?!?: [^ ]"; then
+            echo "::error::\"$title\" is not a Conventional Commit title with an allowed type"
+            exit 1
+          fi
+          echo "\"$title\" is a valid title"

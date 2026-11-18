@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>xstate-otel showcase</title>
+    <script>
+      (() => {
+        const preference = matchMedia('(prefers-color-scheme: dark)');
+        const applySystemTheme = () => document.documentElement.classList.toggle('dark', preference.matches);
+        applySystemTheme();
+        preference.addEventListener('change', applySystemTheme);
+      })();
+    </script>
+    <!-- showcase-styles -->
+  </head>
+  <body class="showcase-viewer">
+    <header>
+      <h1>xstate-otel showcase: order desk</h1>
+      <p id="description">
+        Each scenario is one HTTP request. The traces it produced, including linked ones, appear on
+        the right.
+      </p>
+    </header>
+    <main id="showcase"></main>
+    <!-- showcase-recordings -->
+    <!-- showcase-sources -->
+    <script type="module">
+      /* showcase-renderer */
+      const recordedData = document.getElementById('showcase-recordings');
+      const recordings = recordedData ? JSON.parse(recordedData.textContent) : undefined;
+      const sources = JSON.parse(document.getElementById('showcase-sources').textContent);
+      if (recordings) {
+        document.getElementById('description').textContent =
+          'These traces were recorded from real HTTP scenario runs during the documentation build. Select a scenario to explore its spans, links and microsteps.';
+      }
+      const localDocsBase = new URL('../', location.href);
+      const docsBase = localDocsBase.pathname.endsWith('/xstate-otel/')
+        ? localDocsBase
+        : new URL('https://c0m1t.github.io/actorium/xstate-otel/');
+      mountShowcase(document.getElementById('showcase'), {
+        scenarios: recordings ?? await (await fetch('/api/scenarios')).json(),
+        sources,
+        docsBase,
+        runScenario: recordings
+          ? (scenario) => scenario.run
+          : (scenario) => fetch(`/api/scenarios/${scenario.id}`, { method: 'POST' }).then((response) => response.json()),
+        autoRun: !!recordings,
+      });
+    </script>
+  </body>
+</html>

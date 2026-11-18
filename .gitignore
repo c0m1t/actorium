@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+*.tgz
+docs/xstate-otel/api/
+docs/public/xstate-otel/showcase/
+docs/.vitepress/cache/
+docs/.vitepress/generated/

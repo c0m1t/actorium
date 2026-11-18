@@ -1,0 +1,236 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`keeps the published declarations unchanged 1`] = `
+"// core/types.ts
+import type { ActorRef, ActorRefLike, AnyActorRef, AnyEventObject } from 'xstate';
+export type ScheduledWorkPolicy = {
+    mode: 'untraced';
+} | {
+    mode: 'new-linked-operation';
+    name?: string;
+};
+export interface ScheduledWorkPolicyArgs {
+    actor: AnyActorRef;
+    actionType: 'xstate.raise' | 'xstate.sendTo';
+    event: AnyEventObject;
+    delayMs: number;
+    id?: string;
+}
+export interface PromiseActorArgs<TInput, TEmitted extends AnyEventObject = AnyEventObject> {
+    input: TInput;
+    signal: AbortSignal;
+    self: AnyActorRef;
+    system: AnyActorRef['system'];
+    emit: (event: TEmitted) => void;
+}
+export interface ShouldTraceArgs<TInput> {
+    readonly name: string;
+    readonly input: TInput;
+    readonly self: AnyActorRef;
+    readonly parent: AnyActorRef | undefined;
+}
+export interface TelemetryDiagnostic {
+    readonly phase: 'errorDetails' | 'operationAttributes' | 'workAttributes' | 'shouldTrace' | 'scheduledWorkPolicy' | 'resolveParentActor' | 'scheduler' | 'unassociatedRootError' | 'associatedRootError';
+    readonly error: unknown;
+}
+/** Options read by the lifecycle runtime. Telemetry presentation options live with the backend. */
+export interface LifecycleOptions {
+    /** Optional protected diagnostics; root reports may follow send/start in a microtask. */
+    onTelemetryError?: (diagnostic: TelemetryDiagnostic) => void;
+    /**
+     * Opts into native timer integration for delayed XState \`raise\` and \`sendTo\`
+     * actions, including \`after\`. Unset installs no scheduler hooks. Decisions
+     * are validated and copied per action; timers never hold an operation open.
+     * Unsupported clock/scheduler delegation throws during actor creation.
+     */
+    scheduledWorkPolicy?: ScheduledWorkPolicy | ((args: ScheduledWorkPolicyArgs) => ScheduledWorkPolicy);
+    resolveParentActor?: (actor: ActorRefLike) => ActorRefLike | undefined;
+}
+/**
+ * Events accepted by a command target. Typed actors constrain commands to
+ * their own event union; untyped targets (\`AnyActorRef\`, whose event parameter
+ * is \`any\`) still require an \`AnyEventObject\`. Type-only: no runtime
+ * validation is added.
+ */
+export type CommandEvent<TActor extends AnyActorRef> = TActor extends ActorRef<any, infer TEvent, any> ? 0 extends 1 & TEvent ? AnyEventObject : TEvent : AnyEventObject;
+export type CommandOutcome = 'completed' | 'cancelled' | 'dropped' | 'failed';
+export interface CommandResult {
+    readonly outcome: CommandOutcome;
+    readonly hadError: boolean;
+}
+export interface CommandTrace {
+    readonly operationId: number;
+    readonly traceId: string;
+    readonly spanId: string;
+    readonly finished: Promise<CommandResult>;
+}
+
+// index.ts
+export { XStateTracing, createXStateTracing } from './otel/xstate-tracing.js';
+export { getAttributeKeys, DEFAULT_ATTRIBUTE_NAMESPACE } from './otel/attributes.js';
+export type { AttributeKeys } from './otel/attributes.js';
+export type { CommandEvent, CommandOutcome, CommandResult, CommandTrace, CreateXStateTracingOptions, ErrorDetails, FromPromiseOptions, PromiseActorArgs, ScheduledWorkPolicy, ScheduledWorkPolicyArgs, SendCommandOptions, ShouldTraceArgs, TelemetryDiagnostic, XStateTracingOptions, } from './types.js';
+
+// otel/attributes.ts
+/** Default namespace for every attribute, span-event and span name this package emits. */
+export declare const DEFAULT_ATTRIBUTE_NAMESPACE = "actorium.xstate";
+declare const names: {
+    /** Operation span: type of the event that started the command. */
+    readonly commandEvent: "command.event";
+    /** Operation span: numeric operation id, unique per XStateTracing instance. */
+    readonly operationId: "operation.id";
+    /** Operation span: \`completed\`, \`cancelled\`, \`dropped\` or \`failed\`. */
+    readonly operationOutcome: "operation.outcome";
+    /** Operation span: present and true when any traced work failed. */
+    readonly operationHadError: "operation.had_error";
+    /** Operation span: number of failed work/operation records. */
+    readonly operationErrorCount: "operation.error_count";
+    /** Operation span: relays refused by stopped recipients. */
+    readonly operationDroppedDeliveryCount: "operation.dropped_delivery_count";
+    /** Work spans and span events: id of the actor involved. */
+    readonly actorId: "actor.id";
+    /** Span events: type of the event involved. */
+    readonly eventType: "event.type";
+    /** Microstep events: serialized state value. */
+    readonly stateValue: "state.value";
+    /** Work span: \`cancelled\` when the work was aborted or stopped. */
+    readonly workOutcome: "work.outcome";
+    /** Failed spans: true when no error message or stack was available. */
+    readonly errorDetailsUnavailable: "error.details_unavailable";
+    /** Scheduled operation span: \`xstate.raise\` or \`xstate.sendTo\`. */
+    readonly scheduledAction: "scheduled.action";
+    /** Scheduled operation span: configured delay in milliseconds. */
+    readonly scheduledDelayMs: "scheduled.delay_ms";
+    /** Scheduled operation span: id of the operation that scheduled the work. */
+    readonly scheduledOriginOperationId: "scheduled.origin_operation_id";
+    /** Operation span event: one per microstep when \`recordMicrosteps\` is set. */
+    readonly microstepEvent: "microstep";
+    /** Operation span event: a relay refused by a stopped recipient. */
+    readonly deliveryDroppedEvent: "delivery.dropped";
+    /** Span name: default for operations started by delayed work. */
+    readonly scheduledSpan: "scheduled";
+};
+export type AttributeKeys = {
+    readonly [K in keyof typeof names]: string;
+};
+/**
+ * Returns every attribute, span-event and span name emitted under \`namespace\`,
+ * for building queries and dashboards. Throws for a namespace that is not
+ * lowercase, dot-separated snake_case (for example \`acme.workflows\`).
+ */
+export declare function getAttributeKeys(namespace?: string): AttributeKeys;
+export {};
+
+// otel/xstate-tracing.ts
+import { type Tracer } from '@opentelemetry/api';
+import type { AnyActorRef, AnyEventObject, InspectionEvent, PromiseActorLogic } from 'xstate';
+import type { CommandEvent, CommandTrace, PromiseActorArgs } from '../core/types.js';
+import type { CreateXStateTracingOptions, FromPromiseOptions, SendCommandOptions, XStateTracingOptions } from '../types.js';
+export declare function createXStateTracing(options: CreateXStateTracingOptions): XStateTracing;
+/**
+ * OpenTelemetry tracing for XState v5 actor systems.
+ *
+ * It intentionally knows nothing about machine state names. An operation stays
+ * alive while it has traced finite child actors ("continuations"). Once the
+ * event/macrostep has settled and no continuations remain, the operation ends.
+ */
+export declare class XStateTracing {
+    private readonly runtime;
+    /** Pass this directly to createActor(machine, { inspect: tracing.inspect }). */
+    readonly inspect: (inspection: InspectionEvent) => void;
+    constructor(tracer: Tracer, options?: XStateTracingOptions);
+    /**
+     * Wait for currently queued/executing bookkeeping and its synchronous follow-ups.
+     * Does not await business work, stop actors, force span completion or export.
+     */
+    settle(): Promise<void>;
+    /**
+     * Sends an externally-originated command and creates its semantic operation
+     * span. No trace/span IDs are added to the business event.
+     */
+    sendCommand<TActor extends AnyActorRef>(actor: TActor, event: CommandEvent<TActor>, options: SendCommandOptions): CommandTrace;
+    /**
+     * Runs a callback with the current command span active when \`actor\` is
+     * processing traced work. Useful for explicitly instrumented synchronous
+     * actions; prefer invoked actors for asynchronous work.
+     */
+    withActiveOperation<T>(actor: AnyActorRef, callback: () => T): T;
+    /**
+     * Wrap finite Promise actor logic. The returned actor creates one child span
+     * and continues the operation captured from its parent at actor creation.
+     * shouldTrace can exclude individual children without changing business input.
+     * Auto-instrumented fetch/HTTP calls inside \`implementation\` become children
+     * of this span because its OTel context is made active.
+     */
+    fromPromise<TOutput, TInput = unknown, TEmitted extends AnyEventObject = AnyEventObject>(name: string, implementation: (args: PromiseActorArgs<TInput, TEmitted>) => Promise<TOutput>, options?: FromPromiseOptions<TInput>): PromiseActorLogic<TOutput, TInput, TEmitted>;
+}
+
+// types.ts
+import type { Attributes, Context, Link, SpanKind, Tracer } from '@opentelemetry/api';
+import type { AnyActorRef, AnyEventObject } from 'xstate';
+import type { LifecycleOptions, ShouldTraceArgs } from './core/types.js';
+export type { CommandEvent, CommandOutcome, CommandResult, CommandTrace, PromiseActorArgs, ScheduledWorkPolicy, ScheduledWorkPolicyArgs, ShouldTraceArgs, TelemetryDiagnostic, } from './core/types.js';
+/** The part of FromPromiseOptions read by the telemetry backend. */
+export interface TracedWorkOptions {
+    attributes?: Attributes;
+}
+export interface FromPromiseOptions<TInput> extends TracedWorkOptions {
+    /** Evaluated once at startup with a live creating operation; defaults to true. */
+    shouldTrace?: (args: ShouldTraceArgs<TInput>) => boolean;
+}
+export interface SendCommandOptions {
+    /** Semantic span name, e.g. \`checkout.add_item\`. */
+    name: string;
+    attributes?: Attributes;
+    /**
+     * \`link\` is the default for a fire-and-forget route action: the XState
+     * operation becomes a new trace linked to the incoming HTTP span.
+     *
+     * Use \`child\` when the route/request actually waits for the XState
+     * operation to finish and you want one parent/child trace.
+     */
+    relationship?: 'link' | 'child';
+    parentContext?: Context;
+    kind?: SpanKind;
+    links?: Link[];
+}
+export interface ErrorDetails {
+    type?: string;
+    message?: string;
+    stack?: string;
+    /** Additional exception-event attributes; dedicated fields take precedence. */
+    attributes?: Attributes;
+}
+export interface XStateTracingOptions extends LifecycleOptions {
+    /**
+     * Prefix for every attribute, span-event and span name this package emits;
+     * default \`actorium.xstate\`. Use lowercase, dot-separated snake_case
+     * segments; anything else throws at construction. \`actorIdAttribute\` and
+     * \`detailsUnavailableAttribute\` still replace their full key.
+     */
+    attributeNamespace?: string;
+    /** Synchronous replacement for default failure details; {} suppresses details. */
+    errorDetails?: (error: unknown) => ErrorDetails;
+    /** Attribute for unavailable error details; false disables it. */
+    detailsUnavailableAttribute?: string | false;
+    recordMicrosteps?: boolean;
+    recordStateValues?: boolean;
+    actorIdAttribute?: string | false;
+    operationSpanKind?: SpanKind;
+    workSpanKind?: SpanKind;
+    commonAttributes?: Attributes;
+    operationAttributes?: (args: {
+        actor: AnyActorRef;
+        event: AnyEventObject;
+    }) => Attributes;
+    workAttributes?: (args: {
+        name: string;
+        input: unknown;
+        self: AnyActorRef;
+    }) => Attributes;
+}
+export interface CreateXStateTracingOptions extends XStateTracingOptions {
+    tracer: Tracer;
+}
+"
+`;

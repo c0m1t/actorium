@@ -1,0 +1,8 @@
+# Jaeger for the showcase: run `docker compose up -d`, then start the app with
+# OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 and open http://localhost:16686.
+services:
+  jaeger:
+    image: jaegertracing/jaeger:2.23.0
+    ports:
+      - '16686:16686' # UI
+      - '4318:4318' # OTLP/HTTP

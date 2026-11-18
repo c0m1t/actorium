@@ -1,0 +1,29 @@
+# @actorium/xstate-otel
+
+The published library. `src/core/` is the lifecycle runtime, `src/otel/` the only
+OpenTelemetry code and `src/xstate/` the only private XState access. `scripts/` holds
+`check:package` and `test:compatibility`.
+
+## Runtime
+
+- Preserve runtime semantics: mailbox ordering, continuation handoff, cancellation, bounded
+  cleanup, original business errors and native XState error reporting.
+- XState and `@opentelemetry/api` are the only peers; the host owns the SDK.
+- Prefer XState public APIs. Represent uncertainty explicitly.
+
+## XState semantics
+
+- Record the exact XState version behind any claim about its behaviour.
+- Reproduce disputed behaviour in a focused executable test before relying on it.
+- Keep `SimulatedClock` advancement separate from real timers, Promise microtasks and I/O.
+- Never send synthetic `xstate.done.actor.*` events to emulate invoked work completing.
+- Cover cancellation, reentry, parallel and `after` cases for lifecycle or timing changes.
+
+## Public API
+
+- Functions start with a verb (`create*`, `get*`, `send*`); functions returning actor logic use
+  `from*`; `with*` runs a callback in a context; predicates `should*`, notifications `on*`.
+- Callback inputs are `*Args`, option bags `<Function>Options`. A command enters through
+  `sendCommand`, an operation is its traced unit, work is finite Promise work.
+- `tests/public-api.test.ts` snapshots the published declarations. Update that snapshot only for
+  a deliberate API change and say so in the PR.

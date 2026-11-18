@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "ignoreDependencies": ["@arethetypeswrong/cli", "publint"]
+    },
+    "packages/xstate-otel": {
+      "ignore": ["scripts/package-smoke.ts"]
+    },
+    "docs": {
+      "entry": ["snippets/*.ts", "**/*.data.ts", ".vitepress/components/*.vue"]
+    }
+  }
+}
