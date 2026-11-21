@@ -19,6 +19,8 @@ OpenTelemetry code and `src/xstate/` the only private XState access. `scripts/` 
 - Keep `SimulatedClock` advancement separate from real timers, Promise microtasks and I/O.
 - Never send synthetic `xstate.done.actor.*` events to emulate invoked work completing.
 - Cover cancellation, reentry, parallel and `after` cases for lifecycle or timing changes.
+- `tests/send-matrix.test.ts` pins how XState delivers a send in each target state and what the
+  runtime records for it. Update it with any change to either.
 
 ## Public API
 

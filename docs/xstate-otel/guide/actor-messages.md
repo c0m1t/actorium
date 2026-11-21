@@ -20,6 +20,10 @@ counted; start a command at that boundary instead.
 
 A relay to an actor that is already terminal does not change the outcome;
 see [relays to terminal actors](../reference/outcomes.md#relays-to-terminal-actors).
+A relay to an observed actor that has not started yet waits in its mailbox
+and keeps the operation open until that actor starts and processes it. If the
+actor is stopped first, that delivery is abandoned. Once the operation's other
+work settles, it ends `cancelled`, or `failed` if the command's target failed.
 
 ## Direct `send` calls
 

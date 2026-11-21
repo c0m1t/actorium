@@ -26,9 +26,10 @@ as a [diagnostic](../reference/configuration.md#diagnostics) and that timer is
 untraced.
 
 Only timers scheduled during a traced turn have an origin. A timer scheduled
-during startup or untraced work fires untraced. A cancelled timer creates no
-operation. Linked operations record the action, the delay and the origin's
-operation ID as `scheduled.*` [attributes](../reference/attributes.md).
+during startup or untraced work fires untraced. A cancelled timer, or one
+whose recipient is already terminal when it fires, creates no operation and
+records nothing. Linked operations record the action, the delay and the
+origin's operation ID as `scheduled.*` [attributes](../reference/attributes.md).
 
 ## Timers never hold a command open
 
