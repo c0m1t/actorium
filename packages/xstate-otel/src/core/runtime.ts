@@ -813,13 +813,19 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     this.pendingCommands.set(event, pending);
   }
 
-  /** Matches and consumes the first command for this exact event and recipient. */
+  /**
+   * Matches and consumes the most recent command for this exact event and
+   * recipient. Records leave the list when their sendCommand returns, so
+   * pending records mirror the stack of active sends and the newest one
+   * belongs to the innermost send. Sequential sends never overlap.
+   */
   private shiftPendingCommand(
     event: AnyEventObject,
     recipient: ActorRefLike,
   ): PendingCommand | undefined {
     const pending = this.pendingCommands.get(event);
-    const index = pending?.findIndex(({ operation }) => operation.rootActor === recipient) ?? -1;
+    const index =
+      pending?.findLastIndex(({ operation }) => operation.rootActor === recipient) ?? -1;
     const command = index === -1 ? undefined : pending?.splice(index, 1)[0];
     if (pending?.length === 0) {
       this.pendingCommands.delete(event);

@@ -5,7 +5,7 @@
 | Case                                        | Behaviour                                                                                            |
 | ------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | Reentrant mixed traffic                     | Traced and untraced events keep their own owners in mailbox order                                    |
-| Same event object sent again                | Each send is a separate delivery; commands match by object and recipient                             |
+| Same event object sent again                | Each send is a separate delivery; a command matches by object and recipient, innermost send first    |
 | Shared, frozen, callable or primitive input | Passed through unchanged; ownership comes from the creating actor                                    |
 | Parallel Promise work                       | Each joins; the operation ends after the last is handed back                                         |
 | `onDone`/`onError` starts more work         | The new work joins before the old work is released                                                   |
@@ -25,17 +25,17 @@
 
 These are deliberate boundaries. Each has a workaround.
 
-| Gap                                                   | Workaround                                                                                                    |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `otherActor.send()` inside an action loses the source | Use `sendTo`, or [`sendCommand`](../guide/commands.md) for new work                                           |
-| Async actions and fire-and-forget Promises            | Move finite work into an invoked [`tracing.fromPromise`](../guide/promise-work.md)                            |
-| A callback actor's later `sendBack` is untraced       | [Turn messages into commands](../recipes/http-boundaries.md#subscriptions-and-callback-actors)                |
-| `emit` listeners are not deliveries                   | Start a command or a manual span in the listener                                                              |
-| Timers are untraced without a policy                  | Set [`scheduledWorkPolicy`](../guide/scheduled-work.md) or start a command when they fire                     |
-| A timer scheduled outside a command has no origin     | Schedule from a command, or start a command when it fires                                                     |
-| Application timers, queues and other runtimes         | Start a command at the boundary; [propagate context](../recipes/http-boundaries.md#queues-and-other-services) |
-| Invoked machines have no span of their own            | Only their traced Promise work keeps the command open                                                         |
-| Advancing a clock inside an action without a policy   | The firing looks like a relay from that action; advance clocks between actor calls                            |
-| Process restarts end live operations                  | Start new commands; link to stored context when needed                                                        |
-| One event object in nested sends to one actor         | Outcomes or processing owners can swap; use a new event object per command                                    |
-| `finished` is not a business result                   | Read the snapshot or an application reply                                                                     |
+| Gap                                                                             | Workaround                                                                                                    |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `otherActor.send()` inside an action loses the source                           | Use `sendTo`, or [`sendCommand`](../guide/commands.md) for new work                                           |
+| Async actions and fire-and-forget Promises                                      | Move finite work into an invoked [`tracing.fromPromise`](../guide/promise-work.md)                            |
+| A callback actor's later `sendBack` is untraced                                 | [Turn messages into commands](../recipes/http-boundaries.md#subscriptions-and-callback-actors)                |
+| `emit` listeners are not deliveries                                             | Start a command or a manual span in the listener                                                              |
+| Timers are untraced without a policy                                            | Set [`scheduledWorkPolicy`](../guide/scheduled-work.md) or start a command when they fire                     |
+| A timer scheduled outside a command has no origin                               | Schedule from a command, or start a command when it fires                                                     |
+| Application timers, queues and other runtimes                                   | Start a command at the boundary; [propagate context](../recipes/http-boundaries.md#queues-and-other-services) |
+| Invoked machines have no span of their own                                      | Only their traced Promise work keeps the command open                                                         |
+| Advancing a clock inside an action without a policy                             | The firing looks like a relay from that action; advance clocks between actor calls                            |
+| Process restarts end live operations                                            | Start new commands; link to stored context when needed                                                        |
+| An observer added after `tracing.inspect` resends the event object to its actor | The two deliveries swap owners; send a new event object                                                       |
+| `finished` is not a business result                                             | Read the snapshot or an application reply                                                                     |
