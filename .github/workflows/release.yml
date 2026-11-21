@@ -92,3 +92,15 @@ jobs:
       - if: steps.version.outputs.publish == 'true'
         working-directory: packages/xstate-otel
         run: pnpm publish --no-git-checks --provenance
+
+  # After publishing, so the docs never describe a version npm does not have.
+  docs:
+    needs: [release-please, publish]
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/docs.yml
+    with:
+      ref: ${{ needs.release-please.outputs.release_sha }}
