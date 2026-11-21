@@ -23,9 +23,9 @@ each combination:
 | latest 5.x      |                      |
 
 "Pinned" is the version the repository develops against. "Latest" means the
-newest release that is at least a week old when the matrix runs. The range is
-wider than the tested set: a version inside it that the matrix has not run is
-not verified.
+newest release inside the supported range that is at least a week old when the
+matrix runs. The range is wider than the tested set: a version inside it that
+the matrix has not run is not verified.
 
 ## What the library relies on
 

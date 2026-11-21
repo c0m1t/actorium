@@ -31,11 +31,20 @@ async function catalogVersion(name) {
   return version;
 }
 
-// Peer floors, the development pin and the newest release. `latest` is a range,
-// so it resolves to the newest version outside pnpm's minimumReleaseAge window.
+const { peerDependencies } = JSON.parse(
+  await readFile(join(root, packagePath, 'package.json'), 'utf8'),
+);
+
+// Peer floors, the development pin and the newest supported release. `latest`
+// is the peer range, so it resolves to the newest version inside it that is
+// outside pnpm's minimumReleaseAge window.
 const matrix = {
-  xstate: { '5.33.0': '5.33.0', pinned: await catalogVersion('xstate'), latest: '5' },
-  '@opentelemetry/api': { '1.9.0': '1.9.0', latest: '1' },
+  xstate: {
+    '5.33.0': '5.33.0',
+    pinned: await catalogVersion('xstate'),
+    latest: peerDependencies.xstate,
+  },
+  '@opentelemetry/api': { '1.9.0': '1.9.0', latest: peerDependencies['@opentelemetry/api'] },
 };
 
 function usage() {
