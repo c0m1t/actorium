@@ -11,64 +11,64 @@ import {
 import type { Diagnostics } from './diagnostics.js';
 import type { Operation } from './operation.js';
 import type { TelemetryLink } from './telemetry.js';
-import type { LifecycleOptions, ScheduledWorkPolicyArgs, ScheduledWorkPolicy } from './types.js';
+import type { LifecycleOptions, TimerPolicyArgs, TimerPolicy } from './types.js';
 
-export interface ScheduledDelivery {
+export interface TimerRegistration {
   readonly owner: AnyActorRef;
   readonly recipient: ActorRefLike | undefined;
   readonly event: AnyEventObject;
   readonly origin: TelemetryLink;
   readonly originOperationId: number;
-  readonly policy: Readonly<ScheduledWorkPolicy>;
-  readonly actionType: ScheduledWorkPolicyArgs['actionType'];
+  readonly policy: Readonly<TimerPolicy>;
+  readonly actionType: TimerPolicyArgs['actionType'];
   readonly delayMs: number;
   readonly id: string | undefined;
-  registration: ScheduledRegistrationQueue | undefined;
-  previous: ScheduledDelivery | undefined;
-  next: ScheduledDelivery | undefined;
-  timeoutRecords: Map<unknown, ScheduledDelivery> | undefined;
+  registration: TimerRegistrationQueue | undefined;
+  previous: TimerRegistration | undefined;
+  next: TimerRegistration | undefined;
+  timeoutRecords: Map<unknown, TimerRegistration> | undefined;
   timeoutHandle: unknown;
 }
 
-interface ScheduledDispatch {
+interface TimerDispatch {
   readonly source: AnyActorRef;
   readonly target: AnyActorRef;
   readonly event: AnyEventObject;
-  readonly scheduled: ScheduledDelivery | undefined;
+  readonly timer: TimerRegistration | undefined;
 }
 
 /** Only deferred action associations waiting for their native registration. */
-class ScheduledRegistrationQueue {
-  private first: ScheduledDelivery | undefined;
-  private last: ScheduledDelivery | undefined;
+class TimerRegistrationQueue {
+  private first: TimerRegistration | undefined;
+  private last: TimerRegistration | undefined;
   size = 0;
 
-  append(scheduled: ScheduledDelivery): void {
-    scheduled.previous = this.last;
-    if (this.last) this.last.next = scheduled;
-    else this.first = scheduled;
-    this.last = scheduled;
+  append(timer: TimerRegistration): void {
+    timer.previous = this.last;
+    if (this.last) this.last.next = timer;
+    else this.first = timer;
+    this.last = timer;
     this.size++;
   }
 
-  remove(scheduled: ScheduledDelivery): void {
-    if (scheduled.previous) scheduled.previous.next = scheduled.next;
-    else this.first = scheduled.next;
-    if (scheduled.next) scheduled.next.previous = scheduled.previous;
-    else this.last = scheduled.previous;
-    scheduled.previous = undefined;
-    scheduled.next = undefined;
+  remove(timer: TimerRegistration): void {
+    if (timer.previous) timer.previous.next = timer.next;
+    else this.first = timer.next;
+    if (timer.next) timer.next.previous = timer.previous;
+    else this.last = timer.previous;
+    timer.previous = undefined;
+    timer.next = undefined;
     this.size--;
   }
 
-  find(target: AnyActorRef, delay: number, id: string | undefined): ScheduledDelivery | undefined {
-    for (let scheduled = this.first; scheduled; scheduled = scheduled.next) {
+  find(target: AnyActorRef, delay: number, id: string | undefined): TimerRegistration | undefined {
+    for (let timer = this.first; timer; timer = timer.next) {
       if (
-        (scheduled.recipient === undefined || scheduled.recipient === target) &&
-        scheduled.delayMs === delay &&
-        scheduled.id === id
+        (timer.recipient === undefined || timer.recipient === target) &&
+        timer.delayMs === delay &&
+        timer.id === id
       ) {
-        return scheduled;
+        return timer;
       }
     }
     return undefined;
@@ -80,21 +80,19 @@ class ScheduledRegistrationQueue {
  * associated with the operation that scheduled them, then matched to the
  * scheduler registration and clock callback that delivers them.
  */
-export class ScheduledWork {
+export class TimerIntegration {
   readonly instrumentedSystems: WeakSet<object> = new WeakSet();
-  readonly scheduledRegistrations: WeakMap<
-    ActorRefLike,
-    WeakMap<object, ScheduledRegistrationQueue>
-  > = new WeakMap();
-  readonly scheduledByActor: WeakMap<ActorRefLike, Set<ScheduledDelivery>> = new WeakMap();
-  private scheduledDispatch: ScheduledDispatch | undefined;
+  readonly timerRegistrations: WeakMap<ActorRefLike, WeakMap<object, TimerRegistrationQueue>> =
+    new WeakMap();
+  readonly timersByActor: WeakMap<ActorRefLike, Set<TimerRegistration>> = new WeakMap();
+  private activeDispatch: TimerDispatch | undefined;
 
-  private readonly policy: LifecycleOptions['scheduledWorkPolicy'];
+  private readonly policy: LifecycleOptions['timerPolicy'];
   private readonly diagnostics: Diagnostics;
   private readonly operationForActor: (actor: ActorRefLike) => Operation | undefined;
 
   constructor(
-    policy: LifecycleOptions['scheduledWorkPolicy'],
+    policy: LifecycleOptions['timerPolicy'],
     diagnostics: Diagnostics,
     operationForActor: (actor: ActorRefLike) => Operation | undefined,
   ) {
@@ -115,8 +113,8 @@ export class ScheduledWork {
     source: unknown,
     target: ActorRefLike,
     event: AnyEventObject,
-  ): { readonly scheduled: ScheduledDelivery | undefined } | undefined {
-    const dispatch = this.scheduledDispatch;
+  ): { readonly timer: TimerRegistration | undefined } | undefined {
+    const dispatch = this.activeDispatch;
     if (
       dispatch === undefined ||
       dispatch.source !== source ||
@@ -125,7 +123,7 @@ export class ScheduledWork {
     ) {
       return undefined;
     }
-    this.scheduledDispatch = undefined;
+    this.activeDispatch = undefined;
     return dispatch;
   }
 
@@ -154,15 +152,15 @@ export class ScheduledWork {
       return;
     }
 
-    const details: ScheduledWorkPolicyArgs = {
+    const details: TimerPolicyArgs = {
       actor,
       actionType,
       event: params.event,
       delayMs: params.delay,
       ...(typeof params.id === 'string' ? { id: params.id } : {}),
     };
-    const policy = this.diagnostics.protect<ScheduledWorkPolicy>(
-      'scheduledWorkPolicy',
+    const policy = this.diagnostics.protect<TimerPolicy>(
+      'timerPolicy',
       () => {
         const selected =
           typeof configuredPolicy === 'function' ? configuredPolicy(details) : configuredPolicy;
@@ -171,11 +169,11 @@ export class ScheduledWork {
           return { mode };
         }
         if (mode !== 'new-linked-operation') {
-          throw new TypeError('Invalid scheduled work policy');
+          throw new TypeError('Invalid timer policy');
         }
         const name = selected.name;
         if (name !== undefined && typeof name !== 'string') {
-          throw new TypeError('Scheduled operation name must be a string');
+          throw new TypeError('Timer operation name must be a string');
         }
         // Read supported fields once, inside protection. Never retain the
         // returned object, its accessors, or extra application-owned data.
@@ -185,7 +183,7 @@ export class ScheduledWork {
     );
     const recipient = actionType === 'xstate.raise' ? actor : asActorRefLike(params.to);
 
-    const scheduled: ScheduledDelivery = {
+    const timer: TimerRegistration = {
       owner: actor,
       recipient,
       event: params.event,
@@ -202,51 +200,51 @@ export class ScheduledWork {
       timeoutHandle: undefined,
     };
 
-    const registrations = this.scheduledRegistrations.get(actor) ?? new WeakMap();
-    const byEvent = registrations.get(scheduled.event) ?? new ScheduledRegistrationQueue();
-    byEvent.append(scheduled);
-    scheduled.registration = byEvent;
-    registrations.set(scheduled.event, byEvent);
-    this.scheduledRegistrations.set(actor, registrations);
+    const registrations = this.timerRegistrations.get(actor) ?? new WeakMap();
+    const byEvent = registrations.get(timer.event) ?? new TimerRegistrationQueue();
+    byEvent.append(timer);
+    timer.registration = byEvent;
+    registrations.set(timer.event, byEvent);
+    this.timerRegistrations.set(actor, registrations);
 
-    const byActor = this.scheduledByActor.get(actor) ?? new Set();
-    byActor.add(scheduled);
-    this.scheduledByActor.set(actor, byActor);
+    const byActor = this.timersByActor.get(actor) ?? new Set();
+    byActor.add(timer);
+    this.timersByActor.set(actor, byActor);
   }
 
   cancel(actor: AnyActorRef): void {
-    const scheduled = this.scheduledByActor.get(actor);
-    if (!scheduled) {
+    const timer = this.timersByActor.get(actor);
+    if (!timer) {
       return;
     }
-    for (const delivery of scheduled) {
+    for (const delivery of timer) {
       this.remove(delivery);
     }
   }
 
-  remove(scheduled: ScheduledDelivery): void {
-    this.removeRegistration(scheduled);
-    if (scheduled.timeoutRecords) {
-      scheduled.timeoutRecords.delete(scheduled.timeoutHandle);
-      scheduled.timeoutRecords = undefined;
-      scheduled.timeoutHandle = undefined;
+  remove(timer: TimerRegistration): void {
+    this.removeRegistration(timer);
+    if (timer.timeoutRecords) {
+      timer.timeoutRecords.delete(timer.timeoutHandle);
+      timer.timeoutRecords = undefined;
+      timer.timeoutHandle = undefined;
     }
-    const byActor = this.scheduledByActor.get(scheduled.owner);
-    byActor?.delete(scheduled);
+    const byActor = this.timersByActor.get(timer.owner);
+    byActor?.delete(timer);
     if (byActor?.size === 0) {
-      this.scheduledByActor.delete(scheduled.owner);
-      this.scheduledRegistrations.delete(scheduled.owner);
+      this.timersByActor.delete(timer.owner);
+      this.timerRegistrations.delete(timer.owner);
     }
   }
 
-  private removeRegistration(scheduled: ScheduledDelivery): void {
-    const registration = scheduled.registration;
+  private removeRegistration(timer: TimerRegistration): void {
+    const registration = timer.registration;
     if (!registration) return;
-    registration.remove(scheduled);
+    registration.remove(timer);
     if (registration.size === 0) {
-      this.scheduledRegistrations.get(scheduled.owner)?.delete(scheduled.event);
+      this.timerRegistrations.get(timer.owner)?.delete(timer.event);
     }
-    scheduled.registration = undefined;
+    timer.registration = undefined;
   }
 
   private takeRegistration(
@@ -255,13 +253,13 @@ export class ScheduledWork {
     event: AnyEventObject,
     delay: number,
     id: string | undefined,
-  ): ScheduledDelivery | undefined {
+  ): TimerRegistration | undefined {
     // Deferred actions register in order. Search only this actor/event's
     // unregistered actions, never already pending timers or other actors.
-    const registrations = this.scheduledRegistrations.get(source)?.get(event);
-    const scheduled = registrations?.find(target, delay, id);
-    if (scheduled) this.removeRegistration(scheduled);
-    return scheduled;
+    const registrations = this.timerRegistrations.get(source)?.get(event);
+    const timer = registrations?.find(target, delay, id);
+    if (timer) this.removeRegistration(timer);
+    return timer;
   }
 
   /** Installs scheduler hooks once per actor system. Throws for unsupported setups. */
@@ -276,10 +274,10 @@ export class ScheduledWork {
     // Inherited data methods (SimulatedClock) need an extensible receiver.
     assertTimerMethodDelegation(scheduler, 'system.scheduler', ['schedule', 'cancel']);
     assertTimerMethodDelegation(clock, 'clock', ['setTimeout', 'clearTimeout']);
-    const timeoutRecords = new Map<unknown, ScheduledDelivery>();
+    const timeoutRecords = new Map<unknown, TimerRegistration>();
     const schedule = scheduler.schedule;
     scheduler.schedule = (source, target, event, delay, id) => {
-      const scheduled = this.takeRegistration(source, target, event, delay, id);
+      const timer = this.takeRegistration(source, target, event, delay, id);
       // The scheduler registers a clock callback synchronously. Decorate that
       // callback without replacing/cloning the business event or changing the
       // actor's clock outside registration. Every timer has its own closure,
@@ -291,28 +289,28 @@ export class ScheduledWork {
           () => {
             // XState removes its cancellation slot before relaying. Release our
             // handle index at the same boundary, preserving reentrant schedules.
-            if (scheduled) this.remove(scheduled);
-            const previous = this.scheduledDispatch;
-            this.scheduledDispatch = { source, target, event, scheduled };
+            if (timer) this.remove(timer);
+            const previous = this.activeDispatch;
+            this.activeDispatch = { source, target, event, timer };
             try {
               callback();
             } finally {
-              this.scheduledDispatch = previous;
+              this.activeDispatch = previous;
             }
           },
           delayMs,
         );
-        if (scheduled) {
-          scheduled.timeoutRecords = timeoutRecords;
-          scheduled.timeoutHandle = handle;
-          timeoutRecords.set(handle, scheduled);
+        if (timer) {
+          timer.timeoutRecords = timeoutRecords;
+          timer.timeoutHandle = handle;
+          timeoutRecords.set(handle, timer);
         }
         return handle;
       };
       try {
         clock.setTimeout = decorateTimeout;
       } catch (error) {
-        if (scheduled) this.remove(scheduled);
+        if (timer) this.remove(timer);
         const configurationError = timerConfigurationError(
           'clock.setTimeout no longer allows method delegation',
           error,
@@ -323,7 +321,7 @@ export class ScheduledWork {
       try {
         return schedule.call(scheduler, source, target, event, delay, id);
       } catch (error) {
-        if (scheduled) this.remove(scheduled);
+        if (timer) this.remove(timer);
         throw error;
       } finally {
         clock.setTimeout = setTimeout;
@@ -341,8 +339,8 @@ export class ScheduledWork {
         try {
           clearTimeout.call(clock, handle);
         } finally {
-          const scheduled = timeoutRecords.get(handle);
-          if (scheduled) this.remove(scheduled);
+          const timer = timeoutRecords.get(handle);
+          if (timer) this.remove(timer);
         }
       };
       try {

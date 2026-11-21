@@ -13,22 +13,23 @@ arguments.
 
 ## How a Promise joins a command
 
-When the child actor is created during a traced turn, the runtime records the
-operation that owns that turn. When the Promise starts, it joins that
+When the child actor is created while a traced event is processed, the runtime
+records the operation that owns that processing. When the Promise starts, it joins that
 operation:
 
 1. A work span starts as a child of the operation span.
 2. The implementation runs with the work span's context active, so
    instrumented clients create child spans.
 3. The work span ends when the Promise settles. The operation stays open until
-   the parent has handled `onDone` or `onError`, so replacement work started
-   there joins the same operation.
+   through the [completion handoff](../reference/glossary.md#library-terms),
+   and the parent's handling of `onDone` or `onError` is counted too, so
+   replacement work started there joins the same operation.
 
 Ownership is decided by which actor created the child, not by the input. Input
 is passed through untouched: objects, shared or frozen objects, functions,
 primitives and no input at all work the same way.
 
-A Promise created outside a traced turn, for example during startup, still
+A Promise created outside traced processing, for example during startup, still
 runs normally but creates no span. A Promise that starts after its operation
 ended cannot reopen it.
 

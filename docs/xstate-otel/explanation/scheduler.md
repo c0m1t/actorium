@@ -1,8 +1,8 @@
 # Scheduler internals
 
 This page describes the optional integration that
-[scheduled work](../guide/scheduled-work.md) installs. Without
-`scheduledWorkPolicy`, none of it exists: no wrappers and no timer records.
+[timer policy](../guide/scheduled-work.md) installs. Without
+`timerPolicy`, none of it exists: no wrappers and no timer records.
 
 ## How XState schedules delayed work
 

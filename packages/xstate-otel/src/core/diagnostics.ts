@@ -2,11 +2,11 @@ import type { LifecycleOptions, TelemetryDiagnostic } from './types.js';
 
 /** Protects application callbacks and routes their failures. */
 export class Diagnostics {
-  private readonly options: Pick<LifecycleOptions, 'onTelemetryError'>;
+  private readonly options: Pick<LifecycleOptions, 'onDiagnostic'>;
   private readonly fallback: (diagnostic: TelemetryDiagnostic) => void;
 
   constructor(
-    options: Pick<LifecycleOptions, 'onTelemetryError'>,
+    options: Pick<LifecycleOptions, 'onDiagnostic'>,
     fallback: (diagnostic: TelemetryDiagnostic) => void,
   ) {
     this.options = options;
@@ -24,8 +24,8 @@ export class Diagnostics {
 
   report(diagnostic: TelemetryDiagnostic): void {
     try {
-      if (this.options.onTelemetryError) {
-        this.options.onTelemetryError(diagnostic);
+      if (this.options.onDiagnostic) {
+        this.options.onDiagnostic(diagnostic);
       } else if (
         diagnostic.phase !== 'unassociatedRootError' &&
         diagnostic.phase !== 'associatedRootError'

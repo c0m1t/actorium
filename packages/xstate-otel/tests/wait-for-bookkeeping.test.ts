@@ -1,10 +1,10 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { fromTransition, setup, type AnyActorRef } from 'xstate';
 import { expect, it, vi } from 'vitest';
-import { createXStateTracing, XStateTracing, type CommandTrace } from '../src/index.js';
+import { createXStateTracing, XStateTracing, type OperationTrace } from '../src/index.js';
 import { createTestActor, internals, useTestTracer, expectReleased } from './helpers.js';
 
-const { tracer, spans, getSpan } = useTestTracer('settle');
+const { tracer, spans, getSpan } = useTestTracer('wait-for-bookkeeping');
 // Settled also means no bookkeeping is pending.
 function expectClean(tracing: XStateTracing, ...actors: AnyActorRef[]) {
   const runtime = internals(tracing);
@@ -19,12 +19,12 @@ it.each(['factory', 'constructor'] as const)(
     const tracing =
       mode === 'factory' ? createXStateTracing({ tracer }) : new XStateTracing(tracer);
     let resolved = false;
-    const first = tracing.settle().then(() => {
+    const first = tracing.waitForBookkeeping().then(() => {
       resolved = true;
     });
     expect(resolved).toBe(false);
-    await Promise.all([first, tracing.settle()]);
-    await tracing.settle();
+    await Promise.all([first, tracing.waitForBookkeeping()]);
+    await tracing.waitForBookkeeping();
     expectClean(tracing);
     expect(spans()).toHaveLength(0);
   },
@@ -37,12 +37,12 @@ it.each([false, true])(
     let reentrant: Promise<void> | undefined;
     let reentrantCompleted = false;
     const diagnostic = vi.fn(() => {
-      reentrant = tracing.settle().then(() => {
+      reentrant = tracing.waitForBookkeeping().then(() => {
         reentrantCompleted = true;
       });
       if (throws) throw new Error('diagnostic failed');
     });
-    const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+    const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
     using actor = createTestActor(
       setup({}).createMachine({
         on: {
@@ -58,10 +58,10 @@ it.each([false, true])(
     const onError = vi.fn();
     actor.subscribe({ error: onError }); // Application-owned native error handling.
     actor.start();
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     const command = tracing.sendCommand(actor, { type: 'FAIL' }, { name: 'failure' });
-    const first = tracing.settle();
-    const concurrent = tracing.settle();
+    const first = tracing.waitForBookkeeping();
+    const concurrent = tracing.waitForBookkeeping();
     expect(diagnostic).not.toHaveBeenCalled();
     await Promise.all([first, concurrent]);
     await reentrant;
@@ -74,13 +74,13 @@ it.each([false, true])(
     expect(getSpan('failure').status.code).toBe(SpanStatusCode.ERROR);
     await expect(command.finished).resolves.toEqual({ outcome: 'failed', hadError: true });
     expectClean(tracing, actor);
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
   },
 );
 
-it('observes plain root failures without a CommandTrace', async () => {
+it('observes plain root failures without a OperationTrace', async () => {
   const diagnostic = vi.fn();
-  const tracing = createXStateTracing({ tracer, onTelemetryError: diagnostic });
+  const tracing = createXStateTracing({ tracer, onDiagnostic: diagnostic });
   const failure = { original: true };
   using actor = createTestActor(
     setup({}).createMachine({
@@ -97,7 +97,7 @@ it('observes plain root failures without a CommandTrace', async () => {
   actor.subscribe({ error: vi.fn() });
   actor.start();
   actor.send({ type: 'FAIL' });
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
     phase: 'unassociatedRootError',
     error: failure,
@@ -106,7 +106,7 @@ it('observes plain root failures without a CommandTrace', async () => {
   expectClean(tracing, actor);
 });
 
-it('releases terminal continuations and follows cleanup into operation finalization', async () => {
+it('releases terminal work registrations and follows cleanup into operation finalization', async () => {
   const tracing = new XStateTracing(tracer);
   let complete!: () => void;
   const business = new Promise<void>((resolve) => {
@@ -127,11 +127,11 @@ it('releases terminal continuations and follows cleanup into operation finalizat
   const command = tracing.sendCommand(actor, { type: 'RUN' }, { name: 'completion' });
   const child = actor.getSnapshot().children.work!;
   // An application observation identifies the business boundary, rather than
-  // making settle responsible for waiting on a Promise that has not completed.
+  // making waitForBookkeeping responsible for waiting on a Promise that has not completed.
   const done = new Promise<void>((resolve) => actor.subscribe({ complete: resolve }));
   complete();
   await done;
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expect(spans().map((span) => span.name)).toEqual(['work', 'completion']);
   await expect(command.finished).resolves.toEqual({ outcome: 'completed', hadError: false });
   expectClean(tracing, actor, child);
@@ -159,18 +159,18 @@ it('leaves pending business work and pre-start mailboxes open, then settles canc
   void command.finished.then(() => {
     finished = true;
   });
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expect(finished).toBe(false);
   expect(implementation).not.toHaveBeenCalled();
   expect(spans()).toHaveLength(0);
   actor.start();
   const child = actor.getSnapshot().children.work!;
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expect(implementation.mock.calls[0]?.[0].input).toBe(input);
   expect(finished).toBe(false);
   expect(spans()).toHaveLength(0);
   actor.stop();
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expect(spans().map((span) => span.name)).toEqual(['pending.work', 'pending.command']);
   await expect(command.finished).resolves.toEqual({ outcome: 'cancelled', hadError: false });
   expectClean(tracing, actor, child);
@@ -185,7 +185,7 @@ it('settles silent pre-start stop and stopped-active snapshots without lifecycle
   const subscribe = vi.spyOn(actor, 'subscribe');
   const command = tracing.sendCommand(actor, { type: 'RUN' }, { name: 'prestart' });
   actor.stop();
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   await expect(command.finished).resolves.toEqual({ outcome: 'cancelled', hadError: false });
   expectClean(tracing, actor);
   using active = createTestActor(
@@ -194,7 +194,7 @@ it('settles silent pre-start stop and stopped-active snapshots without lifecycle
   ).start();
   active.stop();
   expect(active.getSnapshot().status).toBe('active');
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expectClean(tracing, active);
   expect(subscribe).not.toHaveBeenCalled();
 });
@@ -211,13 +211,13 @@ it('excludes later independent callbacks while including synchronous reentrant f
     using actor = createTestActor(setup({}).createMachine({}), {
       inspect: tracing.inspect,
     }).start();
-    let later: CommandTrace | undefined;
+    let later: OperationTrace | undefined;
     let reentrant: Promise<void> | undefined;
     runtime.scheduleBookkeeping(() => {
-      reentrant = tracing.settle();
+      reentrant = tracing.waitForBookkeeping();
       later = tracing.sendCommand(actor, { type: 'RUN' }, { name: 'followup' });
     });
-    const first = tracing.settle();
+    const first = tracing.waitForBookkeeping();
     // Enqueued after first's boundary, with a follow-up that must remain pending.
     runtime.scheduleBookkeeping(() => runtime.scheduleBookkeeping(() => {}));
     callbacks.shift()!(); // Initial actor lifecycle check.
@@ -255,7 +255,7 @@ it('releases accounting even when a queued callback fails, preserving its throw'
     runtime.scheduleBookkeeping(() => {
       throw failure;
     });
-    const settlement = tracing.settle();
+    const settlement = tracing.waitForBookkeeping();
     const group = [...runtime.bookkeeping][0]!;
     expect(() => callbacks.shift()!()).toThrow(failure);
     await settlement;

@@ -1,11 +1,11 @@
-# Scheduled work
+# Timers
 
 XState timers (`after`, delayed `raise` and delayed `sendTo`) fire after the
 command that scheduled them has ended. Without configuration they are not
-traced. Setting `scheduledWorkPolicy` installs a scheduler integration that
+traced. Setting `timerPolicy` installs a scheduler integration that
 can start a new operation, linked to the origin, when a timer fires.
 
-<<< @/snippets/scheduled-policy.ts
+<<< @/snippets/timer-policy.ts
 
 Here the `editor.edit` operation ends as soon as the edit is processed. When
 the debounce timer fires, a new `editor.autosave` operation starts with a link
@@ -13,10 +13,10 @@ to the edit, and the save work becomes its child.
 
 ## Policies
 
-| Policy                                    | When the timer fires                                                         |
-| ----------------------------------------- | ---------------------------------------------------------------------------- |
-| `{ mode: 'untraced' }`                    | Delivered without an operation                                               |
-| `{ mode: 'new-linked-operation', name? }` | New operation linked to the origin; default name `actorium.xstate.scheduled` |
+| Policy                                    | When the timer fires                                                               |
+| ----------------------------------------- | ---------------------------------------------------------------------------------- |
+| `{ mode: 'untraced' }`                    | Delivered without an operation                                                     |
+| `{ mode: 'new-linked-operation', name? }` | New operation linked to the origin; default name `actorium.xstate.timer_operation` |
 
 The option takes a fixed policy or a callback that receives
 `{ actor, actionType, event, delayMs, id }` for each timer. The decision is
@@ -25,16 +25,16 @@ object have no effect. A throwing callback or an invalid policy is reported
 as a [diagnostic](../reference/configuration.md#diagnostics) and that timer is
 untraced.
 
-Only timers scheduled during a traced turn have an origin. A timer scheduled
+Only timers scheduled while a traced event is processed have an origin. A timer scheduled
 during startup or untraced work fires untraced. A cancelled timer, or one
 whose recipient is already terminal when it fires, creates no operation and
 records nothing. Linked operations record the action, the delay and the
-origin's operation ID as `scheduled.*` [attributes](../reference/attributes.md).
+origin's operation ID as `timer.*` [attributes](../reference/attributes.md).
 
-## Timers never hold a command open
+## Timers never hold an operation open
 
-The origin operation finishes when its deliveries and Promise work settle,
-whatever timers are pending, and it keeps no reference to them. Use an
+The origin operation finishes when its event processing and Promise work are
+done, whatever timers are pending, and it keeps no reference to them. Use an
 application reply or the actor's snapshot to wait for delayed business work.
 
 ## Clock requirements

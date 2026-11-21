@@ -6,7 +6,7 @@ OpenTelemetry code and `src/xstate/` the only private XState access. `scripts/` 
 
 ## Runtime
 
-- Preserve runtime semantics: mailbox ordering, continuation handoff, cancellation, bounded
+- Preserve runtime semantics: mailbox ordering, completion handoff, cancellation, bounded
   cleanup, original business errors and native XState error reporting.
 - XState and `@opentelemetry/api` are the only peers; the host owns the SDK.
 - Prefer XState public APIs. Represent uncertainty explicitly.
@@ -27,6 +27,7 @@ OpenTelemetry code and `src/xstate/` the only private XState access. `scripts/` 
 - Functions start with a verb (`create*`, `get*`, `send*`); functions returning actor logic use
   `from*`; `with*` runs a callback in a context; predicates `should*`, notifications `on*`.
 - Callback inputs are `*Args`, option bags `<Function>Options`. A command enters through
-  `sendCommand`, an operation is its traced unit, work is finite Promise work.
+  `sendCommand`; an operation is the traced unit a command or timer starts; work is a traced
+  Promise actor's finite work. Use the terms the docs glossary defines.
 - `tests/public-api.test.ts` snapshots the published declarations. Update that snapshot only for
   a deliberate API change and say so in the PR.

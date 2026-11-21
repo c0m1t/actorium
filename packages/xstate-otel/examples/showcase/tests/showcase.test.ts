@@ -25,7 +25,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise((resolve) => server.close(resolve));
   showcase.stop();
-  await showcase.settle();
+  await showcase.waitForBookkeeping();
   await telemetry.shutdown();
 });
 
@@ -35,7 +35,7 @@ interface RunResponse {
   traces: TraceView[];
 }
 
-// The server settles both tracing runtimes before it ends the request span
+// The server waits for both tracing runtimes' bookkeeping before it ends the request span
 // and collects the traces connected to it, so every operation has ended here.
 async function run(id: string): Promise<RunResponse> {
   const response = await fetch(`${baseUrl}/api/scenarios/${id}`, { method: 'POST' });
@@ -46,7 +46,7 @@ async function run(id: string): Promise<RunResponse> {
 // IDs and timings vary between runs; the outline keeps names and structure.
 // The request trace comes first; the others are sorted by content, because
 // start times are only approximate across traces.
-const volatile = /(^|\.)(operation\.id|scheduled\.origin_operation_id)$/;
+const volatile = /(^|\.)(operation\.id|timer\.origin_operation_id)$/;
 
 function outline(traces: TraceView[]): string {
   const format = (attributes: Record<string, unknown>) =>
@@ -108,7 +108,7 @@ describe('showcase scenarios', () => {
       "
       trace
         POST /api/scenarios/:id [server] http.request.method=POST http.route=/api/scenarios/:id url.path=/api/scenarios/place-order http.response.status_code=200
-          order.place [internal] order.id=order-1 actorium.xstate.command.event=PLACE actorium.xstate.operation.outcome=completed
+          order.place [internal] order.id=order-1 actorium.xstate.operation.event_type=PLACE actorium.xstate.operation.outcome=completed
             · microstep orders: PLACE → {}
             · microstep order-1: SUBMIT → {"processing":{"stock":"reserving","payment":"routing"}}
             · microstep order-1: SUBMIT → {"processing":{"stock":"reserving","payment":"charging"}}
@@ -141,7 +141,7 @@ describe('showcase scenarios', () => {
       trace
         POST /api/scenarios/:id [server] http.request.method=POST http.route=/api/scenarios/:id url.path=/api/scenarios/webhook http.response.status_code=200
       trace
-        order.place [internal] order.id=order-2 actorium.xstate.command.event=PLACE actorium.xstate.operation.outcome=completed
+        order.place [internal] order.id=order-2 actorium.xstate.operation.event_type=PLACE actorium.xstate.operation.outcome=completed
           · microstep orders: PLACE → {}
           · microstep order-2: SUBMIT → {"processing":{"stock":"reserving","payment":"routing"}}
           · microstep order-2: SUBMIT → {"processing":{"stock":"reserving","payment":"deferred"}}
@@ -153,7 +153,7 @@ describe('showcase scenarios', () => {
           order.reserve_stock [internal] actorium.xstate.actor.id=reserveStock
             POST inventory/reservations [client]
       trace
-        payment.confirm [internal] order.id=order-2 actorium.xstate.command.event=PAYMENT_CONFIRMED actorium.xstate.operation.outcome=completed
+        payment.confirm [internal] order.id=order-2 actorium.xstate.operation.event_type=PAYMENT_CONFIRMED actorium.xstate.operation.outcome=completed
           · microstep order-2: PAYMENT_CONFIRMED → notifying
           · microstep order-2: xstate.done.actor.notifyCustomer → placed
           · microstep orders: ORDER_CLOSED → {}
@@ -173,7 +173,7 @@ describe('showcase scenarios', () => {
       trace
         POST /api/scenarios/:id [server] http.request.method=POST http.route=/api/scenarios/:id url.path=/api/scenarios/payment-declined http.response.status_code=200
       trace
-        order.place [internal] order.id=order-3 actorium.xstate.command.event=PLACE actorium.xstate.operation.outcome=completed actorium.xstate.operation.had_error=true actorium.xstate.operation.error_count=1
+        order.place [internal] order.id=order-3 actorium.xstate.operation.event_type=PLACE actorium.xstate.operation.outcome=completed actorium.xstate.operation.had_error=true actorium.xstate.operation.error_count=1
           · microstep orders: PLACE → {}
           · microstep order-3: SUBMIT → {"processing":{"stock":"reserving","payment":"routing"}}
           · microstep order-3: SUBMIT → {"processing":{"stock":"reserving","payment":"charging"}}
@@ -204,13 +204,13 @@ describe('showcase scenarios', () => {
       trace
         POST /api/scenarios/:id [server] http.request.method=POST http.route=/api/scenarios/:id url.path=/api/scenarios/cancel-while-charging http.response.status_code=200
       trace
-        order.cancel [internal] order.id=order-4 actorium.xstate.command.event=CANCEL actorium.xstate.operation.outcome=completed
+        order.cancel [internal] order.id=order-4 actorium.xstate.operation.event_type=CANCEL actorium.xstate.operation.outcome=completed
           · microstep order-4: CANCEL → cancelled
           · microstep orders: ORDER_CLOSED → {}
           · microstep orders: xstate.done.actor.order-4 → {}
           → link POST /api/scenarios/:id
       trace
-        order.place [internal] order.id=order-4 actorium.xstate.command.event=PLACE actorium.xstate.operation.outcome=cancelled
+        order.place [internal] order.id=order-4 actorium.xstate.operation.event_type=PLACE actorium.xstate.operation.outcome=cancelled
           · microstep orders: PLACE → {}
           · microstep order-4: SUBMIT → {"processing":{"stock":"reserving","payment":"routing"}}
           · microstep order-4: SUBMIT → {"processing":{"stock":"reserving","payment":"charging"}}
@@ -234,10 +234,10 @@ describe('showcase scenarios', () => {
       trace
         POST /api/scenarios/:id [server] http.request.method=POST http.route=/api/scenarios/:id url.path=/api/scenarios/closed-order http.response.status_code=200
       trace
-        order.cancel [internal] order.id=order-5 actorium.xstate.command.event=CANCEL actorium.xstate.operation.outcome=target_terminal actorium.xstate.operation.outcome_reason=done
+        order.cancel [internal] order.id=order-5 actorium.xstate.operation.event_type=CANCEL actorium.xstate.operation.outcome=target_terminal actorium.xstate.operation.outcome_reason=done
           → link POST /api/scenarios/:id
       trace
-        order.place [internal] order.id=order-5 actorium.xstate.command.event=PLACE actorium.xstate.operation.outcome=completed
+        order.place [internal] order.id=order-5 actorium.xstate.operation.event_type=PLACE actorium.xstate.operation.outcome=completed
           · microstep orders: PLACE → {}
           · microstep order-5: SUBMIT → {"processing":{"stock":"reserving","payment":"routing"}}
           · microstep order-5: SUBMIT → {"processing":{"stock":"reserving","payment":"charging"}}
@@ -268,7 +268,7 @@ describe('showcase scenarios', () => {
       trace
         POST /api/scenarios/:id [server] http.request.method=POST http.route=/api/scenarios/:id url.path=/api/scenarios/reminder http.response.status_code=200
       trace
-        order.place [internal] order.id=order-6 actorium.xstate.command.event=PLACE actorium.xstate.operation.outcome=completed
+        order.place [internal] order.id=order-6 actorium.xstate.operation.event_type=PLACE actorium.xstate.operation.outcome=completed
           · microstep orders: PLACE → {}
           · microstep order-6: SUBMIT → {"processing":{"stock":"reserving","payment":"routing"}}
           · microstep order-6: SUBMIT → {"processing":{"stock":"reserving","payment":"deferred"}}
@@ -280,7 +280,7 @@ describe('showcase scenarios', () => {
           order.reserve_stock [internal] actorium.xstate.actor.id=reserveStock
             POST inventory/reservations [client]
       trace
-        order.reminder [internal] actorium.xstate.scheduled.action=xstate.raise actorium.xstate.scheduled.delay_ms=50 actorium.xstate.command.event=xstate.after.reminder.order.awaitingPayment.waiting actorium.xstate.operation.outcome=completed
+        order.reminder [internal] actorium.xstate.timer.action=xstate.raise actorium.xstate.timer.delay_ms=50 actorium.xstate.operation.event_type=xstate.after.reminder.order.awaitingPayment.waiting actorium.xstate.operation.outcome=completed
           · microstep order-6: xstate.after.reminder.order.awaitingPayment.waiting → {"awaitingPayment":"reminding"}
           · microstep order-6: xstate.done.actor.sendReminder → {"awaitingPayment":"reminded"}
           → link order.place
@@ -303,13 +303,13 @@ describe('showcase scenarios', () => {
       trace
         POST /api/scenarios/:id [server] http.request.method=POST http.route=/api/scenarios/:id url.path=/api/scenarios/analytics http.response.status_code=200
       trace
-        analytics.track [internal] actorium.xstate.command.event=TRACK actorium.xstate.operation.outcome=completed
+        analytics.track [internal] actorium.xstate.operation.event_type=TRACK actorium.xstate.operation.outcome=completed
           · microstep orders: TRACK → {}
           · microstep orders: xstate.done.actor.analytics-2 → {}
           → link POST /api/scenarios/:id
           analytics.send [internal] actorium.xstate.actor.id=analytics-2
       trace
-        analytics.track [internal] actorium.xstate.command.event=TRACK actorium.xstate.operation.outcome=completed
+        analytics.track [internal] actorium.xstate.operation.event_type=TRACK actorium.xstate.operation.outcome=completed
           · microstep orders: TRACK → {}
           → link POST /api/scenarios/:id
       "
@@ -327,7 +327,7 @@ describe('showcase scenarios', () => {
       trace
         POST /api/scenarios/:id [server] http.request.method=POST http.route=/api/scenarios/:id url.path=/api/scenarios/log-in-action http.response.status_code=200
       trace
-        order.add_note [internal] order.id=order-42 actorium.xstate.command.event=ADD_NOTE actorium.xstate.operation.outcome=completed
+        order.add_note [internal] order.id=order-42 actorium.xstate.operation.event_type=ADD_NOTE actorium.xstate.operation.outcome=completed
           · log log.message=note added order.id=order-42 note.text=Leave at the back door
           · microstep orders: ADD_NOTE → {}
           → link POST /api/scenarios/:id
@@ -347,7 +347,7 @@ describe('showcase scenarios', () => {
       trace
         POST /api/scenarios/:id [server] http.request.method=POST http.route=/api/scenarios/:id url.path=/api/scenarios/custom-namespace http.response.status_code=200
       trace
-        order.place [internal] order.id=shop-order-1 shop.orders.command.event=PLACE shop.orders.operation.outcome=completed
+        order.place [internal] order.id=shop-order-1 shop.orders.operation.event_type=PLACE shop.orders.operation.outcome=completed
           → link POST /api/scenarios/:id
           order.reserve_stock [internal] shop.orders.actor.id=reserveStock
             POST inventory/reservations [client]

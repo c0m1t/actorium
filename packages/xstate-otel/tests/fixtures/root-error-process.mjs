@@ -22,7 +22,7 @@ const runtime =
         reporter === 'default'
           ? {}
           : {
-              onTelemetryError: ({ error, phase }) => {
+              onDiagnostic: ({ error, phase }) => {
                 assertFailure(error);
                 reported++;
                 emitted = error;
@@ -130,7 +130,7 @@ if (
 }
 // Let Promise rejection, deferred lifecycle checks and command finalization settle
 // before checking instrumentation. XState's native throw remains a real timer.
-for (let turn = 0; turn < 12; turn++) await Promise.resolve();
+for (let tick = 0; tick < 12; tick++) await Promise.resolve();
 assert.equal(
   observed,
   ['error', 'both'].includes(observer) && (!handled || observerTarget === 'child') ? 1 : 0,
@@ -143,8 +143,8 @@ if (mode === 'traced') {
   for (const [field, table] of Object.entries({
     processing: lifecycle.processing,
     queued: lifecycle.queued,
-    actorContinuations: lifecycle.actorContinuations,
-    scheduledByActor: lifecycle.scheduledWork.scheduledByActor,
+    actorWorkRegistrations: lifecycle.actorWorkRegistrations,
+    timersByActor: lifecycle.timers.timersByActor,
     actorOperations: lifecycle.actorOperations,
   }))
     assert.equal(table.has(actor), false, field);

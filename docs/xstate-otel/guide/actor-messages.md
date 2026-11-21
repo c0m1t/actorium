@@ -6,8 +6,9 @@ needs an explicit boundary.
 
 ## Relays between actors
 
-`sendTo`, `sendParent` and other built-in sends made while an actor handles a
-traced delivery carry the operation to the recipient. The recipient's
+[Relays](../reference/glossary.md#library-terms) such as `sendTo` and
+`sendParent`, made while an actor processes a traced event, carry the
+operation to the recipient. The recipient's
 Promise work and its own relays join too, so a request/reply chain across
 actors stays one trace:
 
@@ -36,7 +37,7 @@ really starts new work.
 
 An immediate `raise` and `always` transitions run inside the current macrostep
 and belong to its operation, including Promise work they start. A `raise` with
-a delay is [scheduled work](scheduled-work.md).
+a delay is a [timer](scheduled-work.md).
 
 ## Invoked and spawned machines
 
@@ -52,11 +53,11 @@ expose in inspection events. See [compatibility](../reference/compatibility.md#w
 
 ## Callback and observable actors
 
-Their lifetimes are not spans. A message a callback actor sends back in a
-later turn has no operation, and neither does work it starts. Adapt each
+Their lifetimes are not spans. A message a callback actor sends back from a
+later callback has no operation, and neither does work it starts. Adapt each
 meaningful message into a command, as in
 [subscriptions and callback actors](../recipes/http-boundaries.md#subscriptions-and-callback-actors).
-Events delivered through `emit` listeners are not deliveries either.
+Events sent with `emit` are not relays either.
 
 ## Actions
 

@@ -5,13 +5,13 @@ import { data as rows } from './attributes.data.ts';
 # Attributes
 
 Every attribute, span-event name and default span name the library emits
-starts with the attribute namespace, `actorium.xstate` by default. Set
-`attributeNamespace` to change it.
+starts with the telemetry namespace, `actorium.xstate` by default. Set
+`telemetryNamespace` to change it.
 
 ## Names
 
 This table is generated from the library's name table. Names are shown under
-the default namespace, with their property in `keys = getAttributeKeys()`.
+the default namespace, with their property in `names = getTelemetryNames()`.
 
 <table>
   <thead>
@@ -19,7 +19,7 @@ the default namespace, with their property in `keys = getAttributeKeys()`.
   </thead>
   <tbody>
     <tr v-for="row in rows" :key="row.key">
-      <td><code>actorium.xstate.{{ row.name }}</code><br /><code>keys.{{ row.key }}</code></td>
+      <td><code>actorium.xstate.{{ row.name }}</code><br /><code>names.{{ row.key }}</code></td>
       <td><strong>{{ row.where }}:</strong> <span v-html="row.meaning"></span></td>
     </tr>
   </tbody>
@@ -36,7 +36,7 @@ types, such as `xstate.init`, appear unchanged as values.
 
 ## In queries and tests
 
-`getAttributeKeys(namespace?)` returns the complete map for a namespace, so
+`getTelemetryNames(namespace?)` returns the complete map for a namespace, so
 dashboards and tests never spell names by hand:
 
-<<< @/snippets/attribute-keys.ts
+<<< @/snippets/telemetry-names.ts

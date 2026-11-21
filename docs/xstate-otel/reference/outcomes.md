@@ -1,25 +1,26 @@
 # Outcomes and errors
 
-`CommandTrace.finished` resolves with `{ outcome, hadError }`. Both describe
+`OperationTrace.finished` resolves with `{ outcome, hadError }`. Both describe
 the tracing lifecycle, not business success, rollback or whether a retry is
 safe.
 
 ## Outcomes
 
-| `outcome`         | Meaning                                                                                                                              |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `completed`       | All of the command's deliveries and traced Promise work settled                                                                      |
-| `cancelled`       | Accepted work was abandoned: queued deliveries discarded by stop or error, or traced Promise work stopped                            |
-| `failed`          | The target actor errored, or `actor.send` threw (the error is rethrown)                                                              |
-| `target_terminal` | When the send was attempted, the target was already known to be terminal                                                             |
-| `unobserved`      | The runtime couldn't link the send to counted processing, and didn't find the target terminal. The actor may still have processed it |
+| `outcome`         | Meaning                                                                                                                                                                    |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `completed`       | All of the operation's counted event processing and traced Promise work finished                                                                                           |
+| `cancelled`       | Accepted, tracked work was stopped or discarded: commands queued behind an event that errored the target, processing interrupted by a stop, or traced Promise work stopped |
+| `failed`          | The target actor errored, or `actor.send` threw (the error is rethrown)                                                                                                    |
+| `target_terminal` | When the send was attempted, the target was already known to be terminal                                                                                                   |
+| `unobserved`      | The runtime couldn't link the send to counted processing, and didn't find the target terminal. The actor may still have processed it                                       |
 
-`outcome` is recorded on the operation span as `operation.outcome`. The
-command is always passed to `actor.send`, so the target keeps XState's native
-behaviour. In XState 5.33, a stopped actor refuses the event with its
-development warning. Otherwise a terminal target accepts it into the mailbox
-and discards it unprocessed: on `start()` for an actor not yet started, or
-when the actor stops after notifying its done-snapshot observers.
+`cancelled` doesn't imply rollback or that I/O stopped. `outcome` is recorded
+on the operation span as `operation.outcome`. The command is always passed to
+`actor.send`, so the target keeps XState's native behaviour. In XState 5.33, a
+stopped actor refuses the event with its development warning. Otherwise a
+terminal target accepts it into the mailbox and discards it unprocessed: on
+`start()` for an actor not yet started, or when the actor stops after
+notifying its done-snapshot observers.
 
 Precedence: a send that throws gives `failed`. Otherwise `target_terminal`
 beats `unobserved`. Both can only come from `sendCommand`; a
@@ -68,7 +69,7 @@ owns, or whose recipient this runtime doesn't observe, records nothing.
 A failed Promise always marks its own work span `ERROR`.
 
 The target actor is the actor passed to `sendCommand`, or the target of a
-scheduled operation. It need not be a system root. `operation.had_error` and
+timer operation. It need not be a root actor. `operation.had_error` and
 `operation.error_count` record the same information on the span; the count
 includes every failed traced span, so recovered failures stay visible.
 
@@ -113,7 +114,7 @@ subscriptions, adds no console output and does not rethrow. An unhandled
 failure keeps XState's native behaviour, and your error observers and parent
 handlers receive the original error.
 
-When a system root fails, `onTelemetryError` receives one diagnostic:
+When a root actor fails, `onDiagnostic` receives one diagnostic:
 `associatedRootError` when an operation was live, otherwise
 `unassociatedRootError`, which creates no span. The hook observes; it cannot
 suppress native reporting. Child failures handled by the parent produce no
@@ -121,4 +122,4 @@ root diagnostic. Commands queued when the root failed finish `cancelled`.
 
 These diagnostics and the related cleanup can run in a microtask after
 `send()` or `start()` returns. Read the snapshot for immediate status, and
-await `finished` or `settle()` for tracing results.
+await `finished` or `waitForBookkeeping()` for tracing results.

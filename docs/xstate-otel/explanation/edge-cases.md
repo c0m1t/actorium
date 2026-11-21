@@ -19,7 +19,7 @@
 | Target actor failure                        | `failed`; XState's native error reporting is unchanged                                               |
 | Command to a terminal or unobserved actor   | Sent natively; see [outcomes](../reference/outcomes.md)                                              |
 | Promise stopped by leaving its state        | Signal aborted, work span `cancelled`, operation `cancelled`                                         |
-| Delay of `0`                                | Still scheduled work, not an immediate relay                                                         |
+| Delay of `0`                                | Still a timer, not an immediate relay                                                                |
 
 ## Known gaps
 
@@ -30,8 +30,8 @@ These are deliberate boundaries. Each has a workaround.
 | `otherActor.send()` inside an action loses the source                           | Use `sendTo`, or [`sendCommand`](../guide/commands.md) for new work                                           |
 | Async actions and fire-and-forget Promises                                      | Move finite work into an invoked [`tracing.fromPromise`](../guide/promise-work.md)                            |
 | A callback actor's later `sendBack` is untraced                                 | [Turn messages into commands](../recipes/http-boundaries.md#subscriptions-and-callback-actors)                |
-| `emit` listeners are not deliveries                                             | Start a command or a manual span in the listener                                                              |
-| Timers are untraced without a policy                                            | Set [`scheduledWorkPolicy`](../guide/scheduled-work.md) or start a command when they fire                     |
+| Events sent with `emit` are not relays                                          | Start a command or a manual span in the listener                                                              |
+| Timers are untraced without a policy                                            | Set [`timerPolicy`](../guide/scheduled-work.md) or start a command when they fire                             |
 | A timer scheduled outside a command has no origin                               | Schedule from a command, or start a command when it fires                                                     |
 | Application timers, queues and other runtimes                                   | Start a command at the boundary; [propagate context](../recipes/http-boundaries.md#queues-and-other-services) |
 | Invoked machines have no span of their own                                      | Only their traced Promise work keeps the command open                                                         |

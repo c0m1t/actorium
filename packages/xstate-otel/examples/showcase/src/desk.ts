@@ -1,4 +1,4 @@
-import type { CommandTrace, XStateTracing } from '@actorium/xstate-otel';
+import type { OperationTrace, XStateTracing } from '@actorium/xstate-otel';
 import {
   assertEvent,
   assign,
@@ -262,21 +262,21 @@ export function createOrderDesk({
       );
       return { orderId, command };
     },
-    confirmPayment: (orderId: string, paymentId: string): CommandTrace =>
+    confirmPayment: (orderId: string, paymentId: string): OperationTrace =>
       tracing.sendCommand(
         requireOrder(orderId),
         { type: 'PAYMENT_CONFIRMED', paymentId },
         { name: 'payment.confirm', attributes: { 'order.id': orderId } },
       ),
-    cancel: (orderId: string): CommandTrace =>
+    cancel: (orderId: string): OperationTrace =>
       tracing.sendCommand(
         requireOrder(orderId),
         { type: 'CANCEL' },
         { name: 'order.cancel', attributes: { 'order.id': orderId } },
       ),
-    track: (name: string): CommandTrace =>
+    track: (name: string): OperationTrace =>
       tracing.sendCommand(desk, { type: 'TRACK', name }, { name: 'analytics.track' }),
-    addNote: (orderId: string, text: string): CommandTrace =>
+    addNote: (orderId: string, text: string): OperationTrace =>
       tracing.sendCommand(
         desk,
         { type: 'ADD_NOTE', orderId, text },

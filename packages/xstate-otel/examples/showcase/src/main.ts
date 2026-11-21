@@ -19,7 +19,7 @@ server.listen(port, () => {
 const shutdown = async (): Promise<void> => {
   server.close();
   showcase.stop();
-  await showcase.settle();
+  await showcase.waitForBookkeeping();
   await telemetry.shutdown();
   process.exit(0);
 };

@@ -3,7 +3,7 @@ import { createXStateTracing } from '@actorium/xstate-otel';
 
 export const tracing = createXStateTracing({
   tracer: trace.getTracer('commerce'),
-  attributeNamespace: 'acme.workflows', // default 'actorium.xstate'
+  telemetryNamespace: 'acme.workflows', // default 'actorium.xstate'
   recordMicrosteps: true,
   recordStateValues: false,
   actorIdAttribute: false,
@@ -12,6 +12,6 @@ export const tracing = createXStateTracing({
   commonAttributes: { 'service.namespace': 'commerce' },
   operationAttributes: ({ event }) => ({ 'command.type': event.type }),
   workAttributes: ({ name }) => ({ 'work.name': name }),
-  onTelemetryError: ({ phase, error }) =>
+  onDiagnostic: ({ phase, error }) =>
     console.warn('Tracing diagnostic', phase, error instanceof Error ? error.name : 'non-error'),
 });

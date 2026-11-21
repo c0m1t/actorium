@@ -80,7 +80,7 @@ export function asActorRefLike(value: unknown): ActorRefLike | undefined {
 export function timerConfigurationError(message: string, cause?: unknown): TypeError {
   return new TypeError(
     `Unsupported native timer tracing configuration: ${message}. ` +
-      'Use mutable clock/scheduler data methods (XState stock clock or SimulatedClock), or omit scheduledWorkPolicy.',
+      'Use mutable clock/scheduler data methods (XState stock clock or SimulatedClock), or omit timerPolicy.',
     { cause },
   );
 }

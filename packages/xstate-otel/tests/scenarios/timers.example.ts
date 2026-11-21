@@ -3,7 +3,7 @@ import { createActor, raise, sendTo, setup } from 'xstate';
 import { createXStateTracing } from '../../src/index.js';
 import type { Harness } from './harness.js';
 
-// A deterministic clock separates the command turn from delayed delivery.
+// A deterministic clock separates the command macrostep from the timer firing.
 export async function timersExample(h: Harness) {
   for (const mode of ['after', 'raise', 'sendTo'] as const) {
     const name = `timer.${mode}.work`;
@@ -76,7 +76,7 @@ export async function timersExample(h: Harness) {
   // Opt into native timer tracing to give delayed work a new linked operation.
   const linkedTracing = createXStateTracing({
     tracer: h.tracer,
-    scheduledWorkPolicy: { mode: 'new-linked-operation', name: 'timer.linked' },
+    timerPolicy: { mode: 'new-linked-operation', name: 'timer.linked' },
   });
   const linkedWork = linkedTracing.fromPromise<string, Record<string, never>>(
     'timer.linked.work',

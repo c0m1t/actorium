@@ -121,7 +121,7 @@ it.each(cases)(
     using actor = createTestActor(machine, { inspect: tracing.inspect }).start();
     const command = tracing.sendCommand(actor, { type: 'RUN' }, { name: 'command' });
     await expect(command.finished).resolves.toEqual({ outcome: 'completed', hadError: true });
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(observed.mock.calls.length).toBe(1);
     expect(Object.is(observed.mock.calls[0]![0], error)).toBe(true);
     const child = getSpan('work');
@@ -156,7 +156,7 @@ it.each(['action', 'send', 'unhandled child'] as const)(
   'records one operation exception for %s failure',
   async (source) => {
     const error = 'original failure';
-    const tracing = createXStateTracing({ tracer, onTelemetryError: () => {} });
+    const tracing = createXStateTracing({ tracer, onDiagnostic: () => {} });
     const work = tracing.fromPromise('work', async () => {
       throw error;
     });
@@ -199,7 +199,7 @@ it.each(['action', 'send', 'unhandled child'] as const)(
       ).resolves.toEqual({ outcome: 'failed', hadError: true });
       expect(observed).toHaveBeenCalledExactlyOnceWith(error);
     }
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     const span = getSpan('command');
     expect(span.status).toEqual({ code: SpanStatusCode.ERROR, message: error });
     expect(span.events).toHaveLength(1);
@@ -239,7 +239,7 @@ it.each(['cancel', 'independent abort', 'late rejection'] as const)(
     if (mode === 'late rejection') pending.reject('too late');
     // Let the underlying Promise rejection and XState reaction run after stop.
     await pending.promise.catch(() => {});
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     const child = getSpan('work');
     expect(child.status.code).toBe(
       mode === 'independent abort' ? SpanStatusCode.ERROR : SpanStatusCode.UNSET,
@@ -255,12 +255,12 @@ it.each(['cancel', 'independent abort', 'late rejection'] as const)(
 async function runMappedFailure(
   errorDetails: import('../src/index.js').XStateTracingOptions['errorDetails'],
   error: unknown = new Error('SECRET'),
-  onTelemetryError = vi.fn((_diagnostic: import('../src/index.js').TelemetryDiagnostic) => {}),
+  onDiagnostic = vi.fn((_diagnostic: import('../src/index.js').TelemetryDiagnostic) => {}),
 ) {
   const tracing = createXStateTracing({
     tracer,
     ...(errorDetails === undefined ? {} : { errorDetails }),
-    onTelemetryError,
+    onDiagnostic,
   });
   const received = vi.fn();
   const work = tracing.fromPromise('mapped.work', async () => {
@@ -283,7 +283,7 @@ async function runMappedFailure(
   await expect(
     tracing.sendCommand(actor, { type: 'RUN' }, { name: 'mapped.command' }).finished,
   ).resolves.toEqual({ outcome: 'completed', hadError: true });
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expect(received.mock.calls).toHaveLength(1);
   expect(Object.is(received.mock.calls[0]![0], error)).toBe(true);
   expect(postEndWrites).toEqual([]);
@@ -413,7 +413,7 @@ it.each([
     errorDetails: () => {
       throw new Error('mapping failed');
     },
-    onTelemetryError: () => {},
+    onDiagnostic: () => {},
   });
   const work = tracing.fromPromise('marker.work', async () => {
     throw new Error('SECRET');
@@ -442,7 +442,7 @@ it.each([
 
 it('calls the mapper once on each failed span for an unhandled child', async () => {
   const mapper = vi.fn((_error: unknown) => ({ message: 'safe' }));
-  const tracing = createXStateTracing({ tracer, errorDetails: mapper, onTelemetryError: () => {} });
+  const tracing = createXStateTracing({ tracer, errorDetails: mapper, onDiagnostic: () => {} });
   const error = new Error('SECRET');
   const work = tracing.fromPromise('work', async () => {
     throw error;
@@ -457,7 +457,7 @@ it('calls the mapper once on each failed span for an unhandled child', async () 
   await expect(
     tracing.sendCommand(actor, { type: 'RUN' }, { name: 'command' }).finished,
   ).resolves.toEqual({ outcome: 'failed', hadError: true });
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expect(mapper).toHaveBeenCalledTimes(2);
   expect(mapper.mock.calls.every((args) => Object.is(args[0], error))).toBe(true);
   for (const span of exporter.getFinishedSpans()) {
@@ -482,7 +482,7 @@ it('does not call the mapper for cancellation or late rejection', async () => {
   await expect(command.finished).resolves.toEqual({ outcome: 'cancelled', hadError: false });
   pending.reject(new Error('SECRET'));
   await pending.promise.catch(() => {});
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expect(mapper).not.toHaveBeenCalled();
   expect(postEndWrites).toEqual([]);
 });
@@ -499,7 +499,7 @@ it.each(['mapper', 'diagnostic'] as const)(
         stop();
         return { message: 'safe' };
       },
-      onTelemetryError: stop,
+      onDiagnostic: stop,
     });
     const work = tracing.fromPromise('work', async () => {
       throw new Error('SECRET');
@@ -515,7 +515,7 @@ it.each(['mapper', 'diagnostic'] as const)(
     actor = createActor(machine, { inspect: tracing.inspect }).start();
     const command = tracing.sendCommand(actor, { type: 'RUN' }, { name: 'command' });
     await command.finished;
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(postEndWrites).toEqual([]);
     const marked = spans().filter((span) => span.status.code === SpanStatusCode.ERROR).length;
     const operation = getSpan('command');
@@ -626,7 +626,7 @@ it.each(['operationAttributes', 'workAttributes'] as const)(
         throw new Error('telemetry failed');
       },
       commonAttributes: { retained: 'yes' },
-      onTelemetryError: diagnostics,
+      onDiagnostic: diagnostics,
     });
     let executions = 0;
     const work = tracing.fromPromise<string, object>('safe.work', async () => {
@@ -690,7 +690,7 @@ it('marks a spontaneous AbortError as failure instead of cancellation', async ()
 
 it('does not swallow callbacks passed to withActiveOperation', async () => {
   const diagnostic = vi.fn();
-  const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+  const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
   using actor = createTestActor(
     setup({}).createMachine({
       on: {

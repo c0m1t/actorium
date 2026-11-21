@@ -84,7 +84,7 @@ export const scenarios: readonly Scenario[] = [
     title: 'Reminder after 2 s',
     shows:
       'An XState `after` timer scheduled by the place command fires later as its own [operation linked to the origin](guide/scheduled-work).',
-    async run({ desk, settle }) {
+    async run({ desk, waitForBookkeeping }) {
       const { orderId, command } = desk.place({ ...tea, card: 'tok_ok', payLater: true });
       await command.finished;
       await waitFor(
@@ -92,7 +92,7 @@ export const scenarios: readonly Scenario[] = [
         (snapshot) => snapshot.matches({ awaitingPayment: 'reminded' }),
         { timeout: 10_000 },
       );
-      await settle();
+      await waitForBookkeeping();
       return { orderId, state: desk.order(orderId)?.getSnapshot().value };
     },
   },
@@ -123,7 +123,7 @@ export const scenarios: readonly Scenario[] = [
     id: 'custom-namespace',
     title: 'Custom namespace',
     shows:
-      'A runtime created with [`attributeNamespace`](reference/attributes) set to `"shop.orders"` emits every attribute under that prefix.',
+      'A runtime created with [`telemetryNamespace`](reference/attributes) set to `"shop.orders"` emits every attribute under that prefix.',
     async run({ shopDesk }) {
       const { orderId, command } = shopDesk.place({ ...tea, card: 'tok_ok' });
       return { orderId, ...(await command.finished) };

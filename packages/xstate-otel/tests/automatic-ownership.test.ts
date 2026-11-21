@@ -173,7 +173,7 @@ it.each(failingPolicies)(
     const diagnostic = vi.fn(() => {
       throw new Error('reporter failed');
     });
-    const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+    const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
     const work = tracing.fromPromise('fallback.work', async () => 'done', {
       shouldTrace: policy as NonNullable<FromPromiseOptions<unknown>['shouldTrace']>,
     });
@@ -246,7 +246,7 @@ it('retains the creating owner when the child is started during another command'
   });
   await tracing.sendCommand(actor, { type: 'START' }, { name: 'later.command' }).finished;
   blocker.resolve('done');
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expect(spanNames()).toContain('origin.block');
   expect(originFinished).toBe(false);
   pending.resolve('done');

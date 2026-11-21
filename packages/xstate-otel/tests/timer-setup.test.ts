@@ -19,8 +19,8 @@ it.each(['untraced', 'new-linked-operation'] as const)(
       initialization = vi.fn(() => ({})),
       startup = vi.fn();
     const tracing = new XStateTracing(tracer, {
-      scheduledWorkPolicy: { mode },
-      onTelemetryError: diagnostic,
+      timerPolicy: { mode },
+      onDiagnostic: diagnostic,
     });
     let actor: AnyActorRef | undefined;
     let original: AnyActorRef['system']['scheduler'] | undefined;
@@ -48,8 +48,8 @@ it.each(['untraced', 'new-linked-operation'] as const)(
     expect(runtime.observedActors.has(actor!)).toBe(false);
     expect(runtime.instrumentedSystems.has(actor!.system)).toBe(false);
     expect(runtime.lifecycleChecks.has(actor!)).toBe(false);
-    expect(runtime.scheduledRegistrations.has(actor!)).toBe(false);
-    expect(runtime.scheduledByActor.has(actor!)).toBe(false);
+    expect(runtime.timerRegistrations.has(actor!)).toBe(false);
+    expect(runtime.timersByActor.has(actor!)).toBe(false);
   },
 );
 
@@ -59,8 +59,8 @@ it.each(['setTimeout', 'clearTimeout'] as const)(
     const clock = mutableClock(new SimulatedClock());
     Object.defineProperty(clock, method, { writable: false });
     const tracing = new XStateTracing(tracer, {
-      scheduledWorkPolicy: { mode: 'untraced' },
-      onTelemetryError: () => {},
+      timerPolicy: { mode: 'untraced' },
+      onDiagnostic: () => {},
     });
     expect(() =>
       createActor(setup({}).createMachine({}), { clock, inspect: tracing.inspect }),
@@ -77,8 +77,8 @@ it.each(['freeze', 'seal', 'preventExtensions'] as const)(
     if (method === 'freeze') Object.freeze(clock);
     else Object[method](clock);
     const tracing = new XStateTracing(tracer, {
-      scheduledWorkPolicy: { mode: 'untraced' },
-      onTelemetryError: () => {},
+      timerPolicy: { mode: 'untraced' },
+      onDiagnostic: () => {},
     });
     expect(() =>
       createActor(setup({}).createMachine({}), { clock, inspect: tracing.inspect }),
@@ -94,8 +94,8 @@ it.each(['setTimeout', 'clearTimeout'] as const)(
     const getter = vi.fn(() => original);
     Object.defineProperty(clock, method, { get: getter });
     const tracing = new XStateTracing(tracer, {
-      scheduledWorkPolicy: { mode: 'untraced' },
-      onTelemetryError: () => {},
+      timerPolicy: { mode: 'untraced' },
+      onDiagnostic: () => {},
     });
     expect(() =>
       createActor(setup({}).createMachine({}), { clock, inspect: tracing.inspect }),
@@ -110,8 +110,8 @@ it.each(['setTimeout', 'clearTimeout'] as const)(
     const clock = mutableClock(new SimulatedClock());
     Object.defineProperty(clock, method, { value: undefined });
     const tracing = new XStateTracing(tracer, {
-      scheduledWorkPolicy: { mode: 'untraced' },
-      onTelemetryError: () => {},
+      timerPolicy: { mode: 'untraced' },
+      onDiagnostic: () => {},
     });
     expect(() =>
       createActor(setup({}).createMachine({}), { clock, inspect: tracing.inspect }),
@@ -123,8 +123,8 @@ it.each(['schedule', 'cancel'] as const)(
   'rejects a readonly scheduler %s before installing any wrappers',
   (method) => {
     const tracing = new XStateTracing(tracer, {
-      scheduledWorkPolicy: { mode: 'untraced' },
-      onTelemetryError: () => {},
+      timerPolicy: { mode: 'untraced' },
+      onDiagnostic: () => {},
     });
     const clock = mutableClock(new SimulatedClock());
     const initialization = vi.fn(() => ({}));
@@ -153,7 +153,7 @@ it.each(['schedule', 'cancel'] as const)(
 
 it('leaves a readonly scheduler cancelAll native and still releases timers on stop', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const clock = mutableClock(new SimulatedClock());
   let cancelAll: AnyActorRef['system']['scheduler']['cancelAll'] | undefined;
@@ -175,15 +175,15 @@ it('leaves a readonly scheduler cancelAll native and still releases timers on st
   ).start();
   await tracing.sendCommand(actor, { type: 'RUN' }, { name: 'timer.readonly-cancel-all' }).finished;
   expect(actor.system.scheduler.cancelAll).toBe(cancelAll);
-  expect(internals(tracing).scheduledByActor.get(actor)?.size).toBe(1);
+  expect(internals(tracing).timersByActor.get(actor)?.size).toBe(1);
   actor.stop();
-  expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
+  expect(internals(tracing).timersByActor.has(actor)).toBe(false);
 });
 
 it('keeps configuration failure visible even if the diagnostic callback throws', () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: () => ({ mode: 'untraced' }),
-    onTelemetryError: () => {
+    timerPolicy: () => ({ mode: 'untraced' }),
+    onDiagnostic: () => {
       throw new Error('diagnostic failure');
     },
   });
@@ -203,7 +203,7 @@ it.each(['seal', 'preventExtensions'] as const)(
     Object[method](clock);
     const { setTimeout, clearTimeout } = clock;
     const tracing = new XStateTracing(tracer, {
-      scheduledWorkPolicy: { mode: 'new-linked-operation' },
+      timerPolicy: { mode: 'new-linked-operation' },
     });
     let received = 0;
     using actor = createTestActor(
@@ -227,14 +227,14 @@ it.each(['seal', 'preventExtensions'] as const)(
     expect(received).toBe(1);
     expect(clock.setTimeout).toBe(setTimeout);
     expect(clock.clearTimeout).toBe(clearTimeout);
-    expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
+    expect(internals(tracing).timersByActor.has(actor)).toBe(false);
   },
 );
 
 it('can use the runtime with a supported clock after a failed configuration', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'untraced' },
-    onTelemetryError: () => {},
+    timerPolicy: { mode: 'untraced' },
+    onDiagnostic: () => {},
   });
   expect(() =>
     createActor(setup({}).createMachine({}), {
@@ -256,8 +256,8 @@ it('does not fall back to native scheduling if the clock is frozen after setup',
     clock = mutableClock(simulated),
     diagnostic = vi.fn();
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'untraced' },
-    onTelemetryError: diagnostic,
+    timerPolicy: { mode: 'untraced' },
+    onDiagnostic: diagnostic,
   });
   let received = 0;
   using actor = createTestActor(
@@ -279,7 +279,7 @@ it('does not fall back to native scheduling if the clock is frozen after setup',
   ).resolves.toEqual({ outcome: 'failed', hadError: true });
   expect(clock.setTimeout).not.toHaveBeenCalled();
   expect(diagnostic).toHaveBeenCalledWith({ phase: 'scheduler', error: expect.any(TypeError) });
-  expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
+  expect(internals(tracing).timersByActor.has(actor)).toBe(false);
   simulated.increment(10);
   expect(received).toBe(0);
   expect(onError).toHaveBeenCalledExactlyOnceWith(actor.getSnapshot().error);
@@ -290,8 +290,8 @@ it('throws a later clearTimeout delegation failure without pretending the timer 
     clock = mutableClock(simulated),
     diagnostic = vi.fn();
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'untraced' },
-    onTelemetryError: diagnostic,
+    timerPolicy: { mode: 'untraced' },
+    onDiagnostic: diagnostic,
   });
   using actor = createTestActor(
     setup({}).createMachine({
@@ -308,18 +308,18 @@ it('throws a later clearTimeout delegation failure without pretending the timer 
   );
   expect(clock.clearTimeout).not.toHaveBeenCalled();
   expect(diagnostic).toHaveBeenCalledWith({ phase: 'scheduler', error: expect.any(TypeError) });
-  expect(internals(tracing).scheduledByActor.has(actor)).toBe(true);
+  expect(internals(tracing).timersByActor.has(actor)).toBe(true);
   // Restore the violated precondition solely to clean up the still-pending timer.
   Object.defineProperty(clock, 'clearTimeout', { writable: true });
   actor.stop();
-  expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
+  expect(internals(tracing).timersByActor.has(actor)).toBe(false);
 });
 
 it.each([false, true])(
   'leaves scheduler methods untouched without opt-in on a frozen clock = %s',
   async (frozen) => {
     const diagnostics = vi.fn();
-    const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostics });
+    const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostics });
     const simulated = new SimulatedClock();
     const suppliedClock = {
       setTimeout: simulated.setTimeout.bind(simulated),
@@ -352,10 +352,10 @@ it.each([false, true])(
     }
     const origin = tracing.sendCommand(actor, { type: 'RUN' }, { name: 'timers.disabled' });
     await expect(origin.finished).resolves.toEqual({ outcome: 'completed', hadError: false });
-    expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
+    expect(internals(tracing).timersByActor.has(actor)).toBe(false);
     simulated.increment(10);
     expect(received).toBe(1);
-    expect(spansNamed('actorium.xstate.scheduled')).toHaveLength(0);
+    expect(spansNamed('actorium.xstate.timer_operation')).toHaveLength(0);
     expect(diagnostics).not.toHaveBeenCalled();
   },
 );
@@ -368,8 +368,8 @@ it('rejects immutable custom clocks during timer tracing setup', () => {
     clearTimeout: simulated.clearTimeout.bind(simulated),
   });
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
-    onTelemetryError: diagnostics,
+    timerPolicy: { mode: 'new-linked-operation' },
+    onDiagnostic: diagnostics,
   });
   let received = 0;
   expect(() =>
@@ -391,7 +391,7 @@ it('rejects immutable custom clocks during timer tracing setup', () => {
 
 it('uses the system scheduling clock even if a child has a different individual clock', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const clock = new SimulatedClock(),
     childClock = new SimulatedClock();
@@ -411,9 +411,9 @@ it('uses the system scheduling clock even if a child has a different individual 
   await expect(command.finished).resolves.toEqual({ outcome: 'completed', hadError: false });
   childClock.increment(10);
   await Promise.resolve();
-  expect(spansNamed('actorium.xstate.scheduled')).toHaveLength(0);
+  expect(spansNamed('actorium.xstate.timer_operation')).toHaveLength(0);
   clock.increment(1);
-  await tracing.settle();
-  expect(spanNames()).toContain('actorium.xstate.scheduled');
-  expect(getSpan('actorium.xstate.scheduled').links[0]?.context.spanId).toBe(command.spanId);
+  await tracing.waitForBookkeeping();
+  expect(spanNames()).toContain('actorium.xstate.timer_operation');
+  expect(getSpan('actorium.xstate.timer_operation').links[0]?.context.spanId).toBe(command.spanId);
 });

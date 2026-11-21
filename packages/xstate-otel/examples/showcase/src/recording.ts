@@ -35,7 +35,7 @@ export async function createRecordedShowcasePage(): Promise<string> {
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     showcase.stop();
-    await showcase.settle();
+    await showcase.waitForBookkeeping();
     await telemetry.shutdown();
   }
 }

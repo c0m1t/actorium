@@ -52,8 +52,8 @@ down the SDK:
 
 <<< @/snippets/shutdown.ts
 
-`settle()` does not wait for business work or export spans; see
-[testing with settle()](../recipes/testing.md#what-settle-waits-for).
+`waitForBookkeeping()` does not wait for business work or export spans; see
+[testing with waitForBookkeeping()](../recipes/testing.md#what-waitforbookkeeping-waits-for).
 
 ## Next steps
 

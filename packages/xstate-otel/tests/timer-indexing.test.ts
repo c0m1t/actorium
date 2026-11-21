@@ -21,13 +21,13 @@ import {
 } from './helpers.js';
 
 const { tracer, exporter, spansNamed, spanNames, getSpan } = useTestTracer('timer-indexing');
-const scheduledSpans = () => spansNamed('actorium.xstate.scheduled');
+const timerOperationSpans = () => spansNamed('actorium.xstate.timer_operation');
 
 // The per-system handle index is private and reachable only from live timer
 // records. Capture it while a timer exists so later checks prove it drained.
 const handleIndexes = new WeakMap<object, Map<unknown, object>>();
 function handleIndex(tracing: XStateTracing, actor: AnyActorRef): Map<unknown, object> | undefined {
-  const live = internals(tracing).scheduledByActor.get(actor);
+  const live = internals(tracing).timersByActor.get(actor);
   // Bypass the instance iterator that countRecordAccess uses to detect scans.
   for (const scheduled of live ? Set.prototype.values.call(live) : []) {
     const records = (scheduled as { timeoutRecords?: Map<unknown, object> }).timeoutRecords;
@@ -68,7 +68,7 @@ function countRecordAccess(tracing: XStateTracing) {
       });
     }
   };
-  const table = internals(tracing).scheduledByActor;
+  const table = internals(tracing).timersByActor;
   const set = table.set.bind(table);
   table.set = (actor, collection) => {
     if (!sets.has(collection)) {
@@ -97,7 +97,7 @@ it.each(['separate commands', 'one macrostep'] as const)(
   'registers shared events and cancels IDs with linear access: %s',
   async (mode) => {
     const tracing = new XStateTracing(trace.getTracer('timer-counts'), {
-      scheduledWorkPolicy: { mode: 'new-linked-operation' },
+      timerPolicy: { mode: 'new-linked-operation' },
     });
     const count = countRecordAccess(tracing);
     const size = 1000,
@@ -127,8 +127,8 @@ it.each(['separate commands', 'one macrostep'] as const)(
     expect(count.fields).toBeLessThanOrEqual(size * 16);
     expect(count.visits).toBe(0);
     // Registered timers must leave the action-association queue immediately.
-    expect(internals(tracing).scheduledRegistrations.get(actor)?.has(event)).toBe(false);
-    expect(internals(tracing).scheduledByActor.get(actor)?.size).toBe(size);
+    expect(internals(tracing).timerRegistrations.get(actor)?.has(event)).toBe(false);
+    expect(internals(tracing).timersByActor.get(actor)?.size).toBe(size);
     expect(handleIndex(tracing, actor)?.size).toBe(size);
     count.fields = 0;
     for (let i = 0; i < size; i++) actor.system.scheduler.cancel(actor, String(i));
@@ -140,7 +140,7 @@ it.each(['separate commands', 'one macrostep'] as const)(
 
 it('does not search other actors sharing a static event in the same system', async () => {
   const tracing = new XStateTracing(trace.getTracer('timer-population'), {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const count = countRecordAccess(tracing),
     event = { type: 'FIRE' },
@@ -166,7 +166,7 @@ it('does not search other actors sharing a static event in the same system', asy
   count.fields = 0;
   for (const actor of root.getSnapshot().context.workers) {
     root.system.scheduler.cancel(actor, 'same-id');
-    expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
+    expect(internals(tracing).timersByActor.has(actor)).toBe(false);
   }
   expect(count.fields).toBeLessThanOrEqual(500 * 8);
   expect(count.visits).toBe(0);
@@ -175,7 +175,7 @@ it('does not search other actors sharing a static event in the same system', asy
 
 it('preserves event identity and origin links after cancelling the middle shared-event timer', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const clock = new SimulatedClock(),
     shared = Object.freeze({ type: 'FIRE' }),
@@ -214,7 +214,7 @@ it('preserves event identity and origin links after cancelling the middle shared
   await Promise.resolve();
   expect(seen).toEqual([shared, shared]);
   expect(seen.every((event) => event === shared)).toBe(true);
-  expect(scheduledSpans().map((span) => span.links[0]?.context.spanId)).toEqual([
+  expect(timerOperationSpans().map((span) => span.links[0]?.context.spanId)).toEqual([
     origins[2]!.spanId,
     origins[0]!.spanId,
   ]);
@@ -226,7 +226,7 @@ it.each(['cancel newest', 'cancel all', 'older fires first', 'newer fires first'
   async (mode) => {
     const run = async (instrumented: boolean) => {
       const tracing = new XStateTracing(tracer, {
-        scheduledWorkPolicy: { mode: 'new-linked-operation' },
+        timerPolicy: { mode: 'new-linked-operation' },
       });
       const clock = new SimulatedClock(),
         seen: number[] = [];
@@ -272,11 +272,11 @@ it.each(['cancel newest', 'cancel all', 'older fires first', 'newer fires first'
         await Promise.resolve();
         actor.system.scheduler.cancel(actor, 'retry'); // Firing already cleared the native slot.
       }
-      if (instrumented) expect(internals(tracing).scheduledByActor.get(actor)?.size).toBe(1);
+      if (instrumented) expect(internals(tracing).timersByActor.get(actor)?.size).toBe(1);
       clock.increment(100);
       await Promise.resolve();
       if (instrumented) {
-        expect(scheduledSpans().map((span) => span.links[0]?.context.spanId)).toEqual(
+        expect(timerOperationSpans().map((span) => span.links[0]?.context.spanId)).toEqual(
           seen.map((i) => origins[i]),
         );
         expectEmpty(tracing, actor);
@@ -296,7 +296,7 @@ it.each(['ordinary action', 'direct scheduler'] as const)(
   'cancels an unassociated newer timer without removing the older trace: %s',
   async (mode) => {
     const tracing = new XStateTracing(tracer, {
-      scheduledWorkPolicy: { mode: 'new-linked-operation' },
+      timerPolicy: { mode: 'new-linked-operation' },
     });
     const clock = new SimulatedClock(),
       seen: number[] = [];
@@ -329,18 +329,20 @@ it.each(['ordinary action', 'direct scheduler'] as const)(
       actor.system.scheduler.schedule(actor, actor, event, 10, 'retry');
     }
     actor.system.scheduler.cancel(actor, 'retry');
-    expect(internals(tracing).scheduledByActor.get(actor)?.size).toBe(1);
+    expect(internals(tracing).timersByActor.get(actor)?.size).toBe(1);
     clock.increment(10);
     await Promise.resolve();
     expect(seen).toEqual([0]);
-    expect(scheduledSpans().map((span) => span.links[0]?.context.spanId)).toEqual([origin.spanId]);
+    expect(timerOperationSpans().map((span) => span.links[0]?.context.spanId)).toEqual([
+      origin.spanId,
+    ]);
     expectEmpty(tracing, actor);
   },
 );
 
 it('removes the exact generated-ID timer through native cancellation', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const clock = new SimulatedClock();
   let received = 0;
@@ -361,12 +363,12 @@ it('removes the exact generated-ID timer through native cancellation', async () 
   clock.increment(100);
   await Promise.resolve();
   expect(received).toBe(0);
-  expect(scheduledSpans()).toHaveLength(0);
+  expect(timerOperationSpans()).toHaveLength(0);
 });
 
 it('delegates stock-clock firing and cancellation and restores both clock methods', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   let received = 0;
   using actor = createTestActor(
@@ -392,15 +394,15 @@ it('delegates stock-clock firing and cancellation and restores both clock method
   actor.system.scheduler.cancel(actor, 'cancel');
   expect(clock.clearTimeout).toBe(clearTimeout);
   // The stock clock fires on a real timer.
-  await vi.waitFor(() => expect(scheduledSpans()).toHaveLength(1));
+  await vi.waitFor(() => expect(timerOperationSpans()).toHaveLength(1));
   expect(received).toBe(1);
-  expect(scheduledSpans()[0]?.links[0]?.context.spanId).toBe(origin.spanId);
+  expect(timerOperationSpans()[0]?.links[0]?.context.spanId).toBe(origin.spanId);
   expectEmpty(tracing, actor);
 });
 
 it('keeps a reentrant replacement timer with the same ID independently indexed', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const clock = new SimulatedClock(),
     event = { type: 'FIRE' };
@@ -418,7 +420,7 @@ it('keeps a reentrant replacement timer with the same ID independently indexed',
   await origin.finished;
   clock.increment(10);
   await Promise.resolve();
-  expect(scheduledSpans()[0]?.links[0]?.context.spanId).toBe(origin.spanId);
+  expect(timerOperationSpans()[0]?.links[0]?.context.spanId).toBe(origin.spanId);
   expect(handleIndex(tracing, actor)?.size).toBe(1);
   actor.system.scheduler.cancel(actor, 'retry');
   expectEmpty(tracing, actor);
@@ -429,7 +431,7 @@ it('keeps a reentrant replacement timer with the same ID independently indexed',
 
 it('keeps shared events, identical IDs, and different recipients in one deferred batch distinct', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: ({ actionType }) => ({ mode: 'new-linked-operation', name: actionType }),
+    timerPolicy: ({ actionType }) => ({ mode: 'new-linked-operation', name: actionType }),
   });
   const clock = new SimulatedClock(),
     event = Object.freeze({ type: 'FIRE' });
@@ -484,7 +486,7 @@ it('keeps shared events, identical IDs, and different recipients in one deferred
 
 it('releases a large mixed-ID timer population on stop without copying records', async () => {
   const tracing = new XStateTracing(trace.getTracer('timer-stop'), {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const clock = new SimulatedClock(),
     shared = { type: 'FIRE' },
@@ -512,8 +514,8 @@ it('releases a large mixed-ID timer population on stop without copying records',
 it('releases deferred associations when the actor fails before native registration', async () => {
   const diagnostic = vi.fn();
   const tracing = new XStateTracing(tracer, {
-    onTelemetryError: diagnostic,
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    onDiagnostic: diagnostic,
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const clock = new SimulatedClock(),
     event = { type: 'FIRE' };
@@ -537,7 +539,7 @@ it('releases deferred associations when the actor fails before native registrati
         tracing.inspect(inspection);
         if (inspection.type === '@xstate.action' && inspection.action.type === 'xstate.raise') {
           sawRegistration =
-            internals(tracing).scheduledRegistrations.get(inspection.actorRef)?.has(event) ?? false;
+            internals(tracing).timerRegistrations.get(inspection.actorRef)?.has(event) ?? false;
         }
       },
     },
@@ -562,8 +564,8 @@ it('releases deferred associations when the actor fails before native registrati
 it('fails scheduled roots and removes timers cancelled by their error', async () => {
   const diagnostic = vi.fn();
   const tracing = new XStateTracing(tracer, {
-    onTelemetryError: diagnostic,
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    onDiagnostic: diagnostic,
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const clock = new SimulatedClock();
   using actor = createTestActor(
@@ -589,12 +591,12 @@ it('fails scheduled roots and removes timers cancelled by their error', async ()
   actor.start();
   await tracing.sendCommand(actor, { type: 'RUN' }, { name: 'timer.origin' }).finished;
   clock.increment(10);
-  await tracing.settle();
-  expect(spanNames()).toContain('actorium.xstate.scheduled');
-  const scheduled = getSpan('actorium.xstate.scheduled');
+  await tracing.waitForBookkeeping();
+  expect(spanNames()).toContain('actorium.xstate.timer_operation');
+  const scheduled = getSpan('actorium.xstate.timer_operation');
   expect(scheduled.attributes['actorium.xstate.operation.outcome']).toBe('failed');
   expect(scheduled.status.code).toBe(SpanStatusCode.ERROR);
-  expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
+  expect(internals(tracing).timersByActor.has(actor)).toBe(false);
   expect(internals(tracing).processing.has(actor)).toBe(false);
   expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
     phase: 'associatedRootError',
@@ -606,7 +608,7 @@ it('fails scheduled roots and removes timers cancelled by their error', async ()
 it.each(['new-linked-operation', 'untraced'] as const)(
   'stores no live operation for %s timers',
   async (mode) => {
-    const tracing = new XStateTracing(tracer, { scheduledWorkPolicy: { mode } });
+    const tracing = new XStateTracing(tracer, { timerPolicy: { mode } });
     const clock = new SimulatedClock();
     using actor = createTestActor(
       setup({}).createMachine({
@@ -617,18 +619,18 @@ it.each(['new-linked-operation', 'untraced'] as const)(
       { inspect: tracing.inspect, clock },
     ).start();
     await tracing.sendCommand(actor, { type: 'RUN' }, { name: 'retention.origin' }).finished;
-    const schedule = [...internals(tracing).scheduledByActor.get(actor)!][0] as {
+    const schedule = [...internals(tracing).timersByActor.get(actor)!][0] as {
       operation?: unknown;
     };
     expect(schedule.operation).toBeUndefined();
     actor.stop();
-    expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
+    expect(internals(tracing).timersByActor.has(actor)).toBe(false);
   },
 );
 
 it('removes a timer record after its stopped recipient discards the firing', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const clock = new SimulatedClock();
   const worker = setup({}).createMachine({});
@@ -648,8 +650,8 @@ it('removes a timer record after its stopped recipient discards the firing', asy
   expectStoppedActorWarnings(actor.getSnapshot().context.worker, ['FIRE'], () =>
     clock.increment(10),
   );
-  expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
-  expect(spansNamed('actorium.xstate.scheduled')).toHaveLength(0);
+  expect(internals(tracing).timersByActor.has(actor)).toBe(false);
+  expect(spansNamed('actorium.xstate.timer_operation')).toHaveLength(0);
   expect(getSpan('timer.stopped').attributes['actorium.xstate.operation.outcome']).toBe(
     'completed',
   );
@@ -657,7 +659,7 @@ it('removes a timer record after its stopped recipient discards the firing', asy
 
 it('observes cancellation through the public scheduler without action inspection', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const clock = new SimulatedClock();
   using actor = createTestActor(
@@ -669,7 +671,7 @@ it('observes cancellation through the public scheduler without action inspection
   const command = tracing.sendCommand(actor, { type: 'RUN' }, { name: 'public.cancel' });
   actor.system.scheduler.cancel(actor, 'timer');
   await expect(command.finished).resolves.toEqual({ outcome: 'completed', hadError: false });
-  expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
+  expect(internals(tracing).timersByActor.has(actor)).toBe(false);
   clock.increment(100);
-  expect(spansNamed('actorium.xstate.scheduled')).toHaveLength(0);
+  expect(spansNamed('actorium.xstate.timer_operation')).toHaveLength(0);
 });

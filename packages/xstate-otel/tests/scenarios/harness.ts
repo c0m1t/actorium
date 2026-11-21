@@ -7,7 +7,7 @@ import {
   SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
 import { SimulatedClock, type AnyActorRef } from 'xstate';
-import { XStateTracing, type CommandTrace } from '../../src/index.js';
+import { XStateTracing, type OperationTrace } from '../../src/index.js';
 import { printSpanForest } from './trace-tree.js';
 
 function createHarness() {
@@ -51,7 +51,7 @@ function createHarness() {
     has(name: string) {
       return spans().some((s) => s.name === name);
     },
-    child(name: string, command: CommandTrace) {
+    child(name: string, command: OperationTrace) {
       const span = spans().find((s) => s.name === name);
       assert.ok(span, `Missing span: ${name}`);
       assert.equal(span.parentSpanContext?.spanId, command.spanId);

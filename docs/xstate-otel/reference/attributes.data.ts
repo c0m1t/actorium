@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 export interface AttributeRow {
-  /** Property of `getAttributeKeys()`. */
+  /** Property of `getTelemetryNames()`. */
   key: string;
   /** Name relative to the namespace. */
   name: string;

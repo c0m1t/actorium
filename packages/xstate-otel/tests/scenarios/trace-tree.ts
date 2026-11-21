@@ -80,7 +80,7 @@ function selectAttributes(attributes: Attributes): string[] {
   const preferred = [
     'demo.scenario',
     'workflow.id',
-    'actorium.xstate.command.event',
+    'actorium.xstate.operation.event_type',
     'actorium.xstate.operation.outcome',
     'actorium.xstate.operation.had_error',
     'actorium.xstate.work.outcome',

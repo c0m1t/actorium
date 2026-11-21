@@ -3,13 +3,13 @@
 exports[`keeps the published declarations unchanged 1`] = `
 "// core/types.ts
 import type { ActorRef, ActorRefLike, AnyActorRef, AnyEventObject } from 'xstate';
-export type ScheduledWorkPolicy = {
+export type TimerPolicy = {
     mode: 'untraced';
 } | {
     mode: 'new-linked-operation';
     name?: string;
 };
-export interface ScheduledWorkPolicyArgs {
+export interface TimerPolicyArgs {
     actor: AnyActorRef;
     actionType: 'xstate.raise' | 'xstate.sendTo';
     event: AnyEventObject;
@@ -30,20 +30,20 @@ export interface ShouldTraceArgs<TInput> {
     readonly parent: AnyActorRef | undefined;
 }
 export interface TelemetryDiagnostic {
-    readonly phase: 'errorDetails' | 'operationAttributes' | 'workAttributes' | 'shouldTrace' | 'scheduledWorkPolicy' | 'resolveParentActor' | 'scheduler' | 'unassociatedRootError' | 'associatedRootError';
+    readonly phase: 'errorDetails' | 'operationAttributes' | 'workAttributes' | 'shouldTrace' | 'timerPolicy' | 'resolveParentActor' | 'scheduler' | 'unassociatedRootError' | 'associatedRootError';
     readonly error: unknown;
 }
 /** Options read by the lifecycle runtime. Telemetry presentation options live with the backend. */
 export interface LifecycleOptions {
     /** Optional protected diagnostics; root reports may follow send/start in a microtask. */
-    onTelemetryError?: (diagnostic: TelemetryDiagnostic) => void;
+    onDiagnostic?: (diagnostic: TelemetryDiagnostic) => void;
     /**
      * Opts into native timer integration for delayed XState \`raise\` and \`sendTo\`
      * actions, including \`after\`. Unset installs no scheduler hooks. Decisions
      * are validated and copied per action; timers never hold an operation open.
      * Unsupported clock/scheduler delegation throws during actor creation.
      */
-    scheduledWorkPolicy?: ScheduledWorkPolicy | ((args: ScheduledWorkPolicyArgs) => ScheduledWorkPolicy);
+    timerPolicy?: TimerPolicy | ((args: TimerPolicyArgs) => TimerPolicy);
     resolveParentActor?: (actor: ActorRefLike) => ActorRefLike | undefined;
 }
 /**
@@ -54,30 +54,30 @@ export interface LifecycleOptions {
  */
 export type CommandEvent<TActor extends AnyActorRef> = TActor extends ActorRef<any, infer TEvent, any> ? 0 extends 1 & TEvent ? AnyEventObject : TEvent : AnyEventObject;
 /** See the outcomes reference for definitions, reasons and precedence. */
-export type CommandOutcome = 'completed' | 'cancelled' | 'failed' | 'target_terminal' | 'unobserved';
-export interface CommandResult {
-    readonly outcome: CommandOutcome;
+export type OperationOutcome = 'completed' | 'cancelled' | 'failed' | 'target_terminal' | 'unobserved';
+export interface OperationResult {
+    readonly outcome: OperationOutcome;
     readonly hadError: boolean;
 }
-export interface CommandTrace {
+export interface OperationTrace {
     readonly operationId: number;
     readonly traceId: string;
     readonly spanId: string;
-    readonly finished: Promise<CommandResult>;
+    readonly finished: Promise<OperationResult>;
 }
 
 // index.ts
 export { XStateTracing, createXStateTracing } from './otel/xstate-tracing.js';
-export { getAttributeKeys, DEFAULT_ATTRIBUTE_NAMESPACE } from './otel/attributes.js';
-export type { AttributeKeys } from './otel/attributes.js';
-export type { CommandEvent, CommandOutcome, CommandResult, CommandTrace, CreateXStateTracingOptions, ErrorDetails, FromPromiseOptions, PromiseActorArgs, ScheduledWorkPolicy, ScheduledWorkPolicyArgs, SendCommandOptions, ShouldTraceArgs, TelemetryDiagnostic, XStateTracingOptions, } from './types.js';
+export { getTelemetryNames, DEFAULT_TELEMETRY_NAMESPACE } from './otel/attributes.js';
+export type { TelemetryNames } from './otel/attributes.js';
+export type { CommandEvent, CreateXStateTracingOptions, ErrorDetails, FromPromiseOptions, OperationOutcome, OperationResult, OperationTrace, PromiseActorArgs, SendCommandOptions, ShouldTraceArgs, TelemetryDiagnostic, TimerPolicy, TimerPolicyArgs, XStateTracingOptions, } from './types.js';
 
 // otel/attributes.ts
 /** Default namespace for every attribute, span-event and span name this package emits. */
-export declare const DEFAULT_ATTRIBUTE_NAMESPACE = "actorium.xstate";
+export declare const DEFAULT_TELEMETRY_NAMESPACE = "actorium.xstate";
 declare const names: {
-    /** Operation span: type of the event that started the command. */
-    readonly commandEvent: "command.event";
+    /** Operation span: type of the event that started the operation. */
+    readonly operationEventType: "operation.event_type";
     /** Operation span: numeric operation id, unique per XStateTracing instance. */
     readonly operationId: "operation.id";
     /** Operation span: \`completed\`, \`cancelled\`, \`failed\`, \`target_terminal\` or \`unobserved\`. */
@@ -102,20 +102,20 @@ declare const names: {
     readonly workOutcome: "work.outcome";
     /** Failed spans: true when no error message or stack was available. */
     readonly errorDetailsUnavailable: "error.details_unavailable";
-    /** Scheduled operation span: \`xstate.raise\` or \`xstate.sendTo\`. */
-    readonly scheduledAction: "scheduled.action";
-    /** Scheduled operation span: configured delay in milliseconds. */
-    readonly scheduledDelayMs: "scheduled.delay_ms";
-    /** Scheduled operation span: id of the operation that scheduled the work. */
-    readonly scheduledOriginOperationId: "scheduled.origin_operation_id";
+    /** Timer operation span: \`xstate.raise\` or \`xstate.sendTo\`. */
+    readonly timerAction: "timer.action";
+    /** Timer operation span: configured delay in milliseconds. */
+    readonly timerDelayMs: "timer.delay_ms";
+    /** Timer operation span: id of the operation that scheduled the timer. */
+    readonly timerOriginOperationId: "timer.origin_operation_id";
     /** Operation span event: one per microstep when \`recordMicrosteps\` is set. */
     readonly microstepEvent: "microstep";
     /** Operation span event: a relay sent to a recipient already terminal. */
     readonly recipientTerminalEvent: "event.recipient_terminal";
-    /** Span name: default for operations started by delayed work. */
-    readonly scheduledSpan: "scheduled";
+    /** Span name: default for operations started by timers. */
+    readonly timerOperationSpan: "timer_operation";
 };
-export type AttributeKeys = {
+export type TelemetryNames = {
     readonly [K in keyof typeof names]: string;
 };
 /**
@@ -123,21 +123,21 @@ export type AttributeKeys = {
  * for building queries and dashboards. Throws for a namespace that is not
  * lowercase, dot-separated snake_case (for example \`acme.workflows\`).
  */
-export declare function getAttributeKeys(namespace?: string): AttributeKeys;
+export declare function getTelemetryNames(namespace?: string): TelemetryNames;
 export {};
 
 // otel/xstate-tracing.ts
 import { type Tracer } from '@opentelemetry/api';
 import type { AnyActorRef, AnyEventObject, InspectionEvent, PromiseActorLogic } from 'xstate';
-import type { CommandEvent, CommandTrace, PromiseActorArgs } from '../core/types.js';
+import type { CommandEvent, OperationTrace, PromiseActorArgs } from '../core/types.js';
 import type { CreateXStateTracingOptions, FromPromiseOptions, SendCommandOptions, XStateTracingOptions } from '../types.js';
 export declare function createXStateTracing(options: CreateXStateTracingOptions): XStateTracing;
 /**
  * OpenTelemetry tracing for XState v5 actor systems.
  *
  * It intentionally knows nothing about machine state names. An operation stays
- * alive while it has traced finite child actors ("continuations"). Once the
- * event/macrostep has settled and no continuations remain, the operation ends.
+ * open while it has counted event processing or work registrations for traced
+ * Promise actors. Once both are gone, the operation ends.
  */
 export declare class XStateTracing {
     private readonly runtime;
@@ -145,17 +145,18 @@ export declare class XStateTracing {
     readonly inspect: (inspection: InspectionEvent) => void;
     constructor(tracer: Tracer, options?: XStateTracingOptions);
     /**
-     * Wait for currently queued/executing bookkeeping and its synchronous follow-ups.
-     * Does not await business work, stop actors, force span completion or export.
+     * Waits for currently queued or running bookkeeping groups and their follow-ups.
+     * Does not wait for business work or empty mailboxes, stop actors, force span
+     * completion or export.
      */
-    settle(): Promise<void>;
+    waitForBookkeeping(): Promise<void>;
     /**
      * Sends an externally-originated command and creates its semantic operation
      * span. No trace/span IDs are added to the business event.
      */
-    sendCommand<TActor extends AnyActorRef>(actor: TActor, event: CommandEvent<TActor>, options: SendCommandOptions): CommandTrace;
+    sendCommand<TActor extends AnyActorRef>(actor: TActor, event: CommandEvent<TActor>, options: SendCommandOptions): OperationTrace;
     /**
-     * Runs a callback with the current command span active when \`actor\` is
+     * Runs a callback with the current operation span active when \`actor\` is
      * processing traced work. Useful for explicitly instrumented synchronous
      * actions; prefer invoked actors for asynchronous work.
      */
@@ -174,7 +175,7 @@ export declare class XStateTracing {
 import type { Attributes, Context, Link, SpanKind, Tracer } from '@opentelemetry/api';
 import type { AnyActorRef, AnyEventObject } from 'xstate';
 import type { LifecycleOptions, ShouldTraceArgs } from './core/types.js';
-export type { CommandEvent, CommandOutcome, CommandResult, CommandTrace, PromiseActorArgs, ScheduledWorkPolicy, ScheduledWorkPolicyArgs, ShouldTraceArgs, TelemetryDiagnostic, } from './core/types.js';
+export type { CommandEvent, OperationOutcome, OperationResult, OperationTrace, PromiseActorArgs, ShouldTraceArgs, TelemetryDiagnostic, TimerPolicy, TimerPolicyArgs, } from './core/types.js';
 /** The part of FromPromiseOptions read by the telemetry backend. */
 export interface TracedWorkOptions {
     attributes?: Attributes;
@@ -213,7 +214,7 @@ export interface XStateTracingOptions extends LifecycleOptions {
      * segments; anything else throws at construction. \`actorIdAttribute\` and
      * \`detailsUnavailableAttribute\` still replace their full key.
      */
-    attributeNamespace?: string;
+    telemetryNamespace?: string;
     /** Synchronous replacement for default failure details; {} suppresses details. */
     errorDetails?: (error: unknown) => ErrorDetails;
     /** Attribute for unavailable error details; false disables it. */

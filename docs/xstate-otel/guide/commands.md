@@ -2,7 +2,7 @@
 
 A command is an event that enters the actor system through `sendCommand`. It
 starts an operation span, sends the original event object with `actor.send`
-and returns a `CommandTrace` handle.
+and returns an `OperationTrace` handle.
 
 <<< @/snippets/commands.ts
 
@@ -39,17 +39,18 @@ The relationship only shapes the trace; it does not make the caller wait. See
 
 ## What the operation covers
 
-The operation includes the command's delivery, everything processed in the
-same macrostep, immediate relays to other actors in the system, and every
-`tracing.fromPromise` actor those turns create, until each Promise's completion has
-been handled. It ends when no counted delivery or Promise work remains, so a
-command that leaves the actor waiting for a person ends right away.
+The operation includes the processing of the command's event, everything in
+the same macrostep, immediate relays to other actors in the system, and every
+traced Promise actor created while processing them, through its
+[completion handoff](../reference/glossary.md#library-terms). It ends when no
+counted event processing or work registration remains, so a command that
+leaves the actor waiting for a person ends right away.
 
 Work that starts later is not part of it: a timer firing, a callback actor's
-later message or a subscription event. Give those their own command, or use
-[scheduled work](scheduled-work.md) for XState timers.
+later message or a subscription event. Give those their own command, or set a
+[timer policy](scheduled-work.md) for XState timers.
 
-## The `CommandTrace` handle
+## The `OperationTrace` handle
 
 | Property      | Meaning                                                     |
 | ------------- | ----------------------------------------------------------- |

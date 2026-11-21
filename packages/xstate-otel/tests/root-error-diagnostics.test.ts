@@ -41,7 +41,7 @@ it.each([new Error('root failure'), 'string failure'])(
   'reports an unassociated original value after send and cleans its ledger: %s',
   async (failure) => {
     const diagnostic = vi.fn();
-    const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+    const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
     using actor = createTestActor(failingMachine(failure), { inspect: tracing.inspect });
     const first = vi.fn(),
       second = vi.fn();
@@ -51,7 +51,7 @@ it.each([new Error('root failure'), 'string failure'])(
     actor.send({ type: 'FAIL' });
     expect(actor.getSnapshot().error).toBe(failure);
     expect(diagnostic).not.toHaveBeenCalled();
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(diagnostic).toHaveBeenCalledOnce();
     expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
       phase: 'unassociatedRootError',
@@ -80,7 +80,7 @@ it.each([false, true])(
         if (throws) throw new Error('hook failed');
       });
       const diagnostic = throws ? hook : undefined;
-      const tracing = new XStateTracing(tracer, diagnostic ? { onTelemetryError: diagnostic } : {});
+      const tracing = new XStateTracing(tracer, diagnostic ? { onDiagnostic: diagnostic } : {});
       using actor = createTestActor(failingMachine(failure), { inspect: tracing.inspect });
       const onError = vi.fn();
       actor.subscribe({ error: onError });
@@ -110,7 +110,7 @@ it('balances abandoned pre-start commands before invoking a throwing diagnostic 
       !internals(tracing).processing.has(actor) && !internals(tracing).queued.has(actor);
     throw new Error('diagnostic failure');
   });
-  tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+  tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
   actor = createActor(
     setup({}).createMachine({
       entry: () => {
@@ -142,7 +142,7 @@ it('balances abandoned pre-start commands before invoking a throwing diagnostic 
 it('waits for startup before reporting an initial context error', async () => {
   const failure = new Error('context failed'),
     diagnostic = vi.fn();
-  const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+  const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
   using actor = createTestActor(
     setup({}).createMachine({
       context: () => {
@@ -156,7 +156,7 @@ it('waits for startup before reporting an initial context error', async () => {
   const onError = vi.fn();
   actor.subscribe({ error: onError });
   actor.start();
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expect(diagnostic).toHaveBeenCalledOnce();
   expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
     phase: 'unassociatedRootError',
@@ -170,7 +170,7 @@ it('waits for startup before reporting an initial context error', async () => {
 it('preserves associated failure spans and cleanup with immediate stop', async () => {
   const failure = new Error('command failure'),
     diagnostic = vi.fn();
-  const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+  const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
   using actor = createTestActor(failingMachine(failure), { inspect: tracing.inspect });
   const onError = vi.fn();
   actor.subscribe({ error: onError });
@@ -195,13 +195,13 @@ it('preserves associated failure spans and cleanup with immediate stop', async (
 it('does not borrow an ended command for a later root failure', async () => {
   const failure = new Error('later error'),
     diagnostic = vi.fn();
-  const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+  const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
   using actor = createTestActor(failingMachine(failure), { inspect: tracing.inspect });
   actor.subscribe({ error: vi.fn() });
   actor.start();
   await tracing.sendCommand(actor, { type: 'RUN' }, { name: 'previous' }).finished;
   actor.send({ type: 'FAIL' });
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expect(diagnostic).toHaveBeenCalledOnce();
   expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
     phase: 'unassociatedRootError',
@@ -216,7 +216,7 @@ it.each([false, true])(
   async (handled) => {
     const failure = new Error('child failure'),
       diagnostic = vi.fn();
-    const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+    const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
     const child = fromCallback(() => {
       throw failure;
     });
@@ -253,8 +253,8 @@ it('reports a linked timer root failure while preserving timer cleanup', async (
   const diagnostic = vi.fn(),
     clock = new SimulatedClock();
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
-    onTelemetryError: diagnostic,
+    timerPolicy: { mode: 'new-linked-operation' },
+    onDiagnostic: diagnostic,
   });
   const failure = new Error('timer failure');
   using actor = createTestActor(
@@ -279,13 +279,13 @@ it('reports a linked timer root failure while preserving timer cleanup', async (
   actor.start();
   await tracing.sendCommand(actor, { type: 'RUN' }, { name: 'timer.origin' }).finished;
   clock.increment(10);
-  await tracing.settle();
-  expect(spanNames()).toContain('actorium.xstate.scheduled');
+  await tracing.waitForBookkeeping();
+  expect(spanNames()).toContain('actorium.xstate.timer_operation');
   expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
     phase: 'associatedRootError',
     error: failure,
   });
-  expect(getSpan('actorium.xstate.scheduled').status.code).toBe(SpanStatusCode.ERROR);
+  expect(getSpan('actorium.xstate.timer_operation').status.code).toBe(SpanStatusCode.ERROR);
   expectClean(tracing, actor);
 });
 
@@ -317,7 +317,7 @@ it('never subscribes to newly observed actors and coalesces ordinary delivery ch
 it('preserves the failing command when an application observer sends reentrant work', async () => {
   const failure = new Error('reentrant failure'),
     diagnostic = vi.fn();
-  const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+  const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
   using actor = createTestActor(failingMachine(failure), { inspect: tracing.inspect });
   let reentrant: ReturnType<typeof tracing.sendCommand> | undefined;
   const onError = vi.fn(() => {
@@ -370,7 +370,7 @@ it('preserves replacement Promise ownership after a child initialization failure
     diagnostic = vi.fn(),
     handled = vi.fn();
   const completion = deferred<void>();
-  const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+  const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
   using actor = createTestActor(
     setup({
       actors: {

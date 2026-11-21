@@ -1,18 +1,18 @@
 import { raise, setup, SimulatedClock, sendTo, type AnyEventObject, waitFor } from 'xstate';
 import { expect, it, vi } from 'vitest';
-import { XStateTracing, type ScheduledWorkPolicy } from '../src/index.js';
+import { XStateTracing, type TimerPolicy } from '../src/index.js';
 import { deferred, internals, createTestActor, useTestTracer } from './helpers.js';
 
-// Scheduled work: policy decisions, linked operations for delayed events and
+// Timers: policy decisions, linked operations for delayed events and
 // the clocks they run on.
-const { tracer, spans, spansNamed, spanNames, getSpan } = useTestTracer('scheduled-work');
+const { tracer, spans, spansNamed, spanNames, getSpan } = useTestTracer('timers');
 
 it.each(['static', 'callback'] as const)(
   'snapshots %s policy decisions without changing pending timers',
   async (source) => {
     const policy = { mode: 'new-linked-operation' as const, name: 'policy.original' };
     const tracing = new XStateTracing(tracer, {
-      scheduledWorkPolicy: source === 'static' ? policy : () => policy,
+      timerPolicy: source === 'static' ? policy : () => policy,
     });
     const clock = new SimulatedClock();
     let received = 0;
@@ -27,26 +27,26 @@ it.each(['static', 'callback'] as const)(
     ).start();
     const origin = tracing.sendCommand(actor, { type: 'RUN' }, { name: 'policy.origin' });
     await origin.finished;
-    const schedule = [...internals(tracing).scheduledByActor.get(actor)!][0] as {
-      policy: ScheduledWorkPolicy;
+    const schedule = [...internals(tracing).timersByActor.get(actor)!][0] as {
+      policy: TimerPolicy;
     };
     expect(schedule.policy).not.toBe(policy);
     expect(schedule.policy).toEqual({ mode: 'new-linked-operation', name: 'policy.original' });
     Object.assign(policy, { mode: 'untraced', name: 'policy.changed' });
     await tracing.sendCommand(actor, { type: 'RUN' }, { name: 'policy.future' }).finished;
     clock.increment(100);
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spanNames()).toContain('policy.original');
     expect(received).toBe(2);
     expect(getSpan('policy.original').links[0]?.context.spanId).toBe(origin.spanId);
     expect(spansNamed('policy.changed')).toHaveLength(0);
-    expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
+    expect(internals(tracing).timersByActor.has(actor)).toBe(false);
   },
 );
 
 it('keeps an untraced decision fixed after the consumer enables linked policy', async () => {
   const policy = { mode: 'untraced' as const };
-  const tracing = new XStateTracing(tracer, { scheduledWorkPolicy: policy });
+  const tracing = new XStateTracing(tracer, { timerPolicy: policy });
   const clock = new SimulatedClock();
   let received = 0;
   using actor = createTestActor(
@@ -77,10 +77,10 @@ it.each(['mode', 'name'] as const)(
       get() {
         throw failure;
       },
-    }) as ScheduledWorkPolicy;
+    }) as TimerPolicy;
     const tracing = new XStateTracing(tracer, {
-      scheduledWorkPolicy: () => policy,
-      onTelemetryError: diagnostics,
+      timerPolicy: () => policy,
+      onDiagnostic: diagnostics,
     });
     const clock = new SimulatedClock();
     let received = 0;
@@ -96,11 +96,11 @@ it.each(['mode', 'name'] as const)(
     await expect(
       tracing.sendCommand(actor, { type: 'RUN' }, { name: 'getter.origin' }).finished,
     ).resolves.toEqual({ outcome: 'completed', hadError: false });
-    expect(diagnostics).toHaveBeenCalledWith({ phase: 'scheduledWorkPolicy', error: failure });
+    expect(diagnostics).toHaveBeenCalledWith({ phase: 'timerPolicy', error: failure });
     expect(() => clock.increment(1)).not.toThrow();
     expect(received).toBe(1);
-    expect(spansNamed('actorium.xstate.scheduled')).toHaveLength(0);
-    expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
+    expect(spansNamed('actorium.xstate.timer_operation')).toHaveLength(0);
+    expect(internals(tracing).timersByActor.has(actor)).toBe(false);
   },
 );
 
@@ -112,7 +112,7 @@ it('copies only supported primitive policy fields and evaluates getters once', a
   });
   let rawPolicy: object | undefined;
   const tracing: XStateTracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: ({ actor }): ScheduledWorkPolicy => {
+    timerPolicy: ({ actor }): TimerPolicy => {
       rawPolicy = {
         get mode() {
           return mode();
@@ -125,7 +125,7 @@ it('copies only supported primitive policy fields and evaluates getters once', a
         },
         retained: internals(tracing).processing.get(actor)?.operation,
       };
-      return rawPolicy as ScheduledWorkPolicy;
+      return rawPolicy as TimerPolicy;
     },
   });
   const clock = new SimulatedClock();
@@ -139,15 +139,15 @@ it('copies only supported primitive policy fields and evaluates getters once', a
   ).start();
   const origin = tracing.sendCommand(actor, { type: 'RUN' }, { name: 'normalized.origin' });
   await origin.finished;
-  const schedule = [...internals(tracing).scheduledByActor.get(actor)!][0] as {
-    policy: ScheduledWorkPolicy;
+  const schedule = [...internals(tracing).timersByActor.get(actor)!][0] as {
+    policy: TimerPolicy;
   };
   expect(schedule.policy === rawPolicy).toBe(false);
   expect(schedule.policy).toEqual({ mode: 'new-linked-operation', name: 'normalized.timer' });
   expect(Object.getOwnPropertyDescriptor(schedule.policy, 'name')?.get).toBeUndefined();
   expect('operation' in schedule).toBe(false);
   clock.increment(10);
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expect(spanNames()).toContain('normalized.timer');
   expect(mode).toHaveBeenCalledOnce();
   expect(name).toHaveBeenCalledOnce();
@@ -157,7 +157,7 @@ it('copies only supported primitive policy fields and evaluates getters once', a
 
 it('ordinary and explicit sends cannot consume a timer association', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const clock = new SimulatedClock();
   const event = Object.freeze({ type: 'FIRE', value: 1 });
@@ -179,20 +179,20 @@ it('ordinary and explicit sends cannot consume a timer association', async () =>
   await origin.finished;
   actor.send(event);
   await tracing.sendCommand(actor, event, { name: 'timer.reuse.command' }).finished;
-  expect(spansNamed('actorium.xstate.scheduled')).toHaveLength(0);
+  expect(spansNamed('actorium.xstate.timer_operation')).toHaveLength(0);
   expect(getSpan('timer.reuse.command').attributes['actorium.xstate.operation.outcome']).toBe(
     'completed',
   );
   clock.increment(10);
-  await tracing.settle();
-  expect(spanNames()).toContain('actorium.xstate.scheduled');
-  expect(getSpan('actorium.xstate.scheduled').links[0]?.context.spanId).toBe(origin.spanId);
+  await tracing.waitForBookkeeping();
+  expect(spanNames()).toContain('actorium.xstate.timer_operation');
+  expect(getSpan('actorium.xstate.timer_operation').links[0]?.context.spanId).toBe(origin.spanId);
   expect(seen).toHaveLength(3);
   expect(seen.every((received) => received === event)).toBe(true);
 });
 
 it('explicit commands override untraced schedules using the same event', async () => {
-  const tracing = new XStateTracing(tracer, { scheduledWorkPolicy: { mode: 'untraced' } });
+  const tracing = new XStateTracing(tracer, { timerPolicy: { mode: 'untraced' } });
   const clock = new SimulatedClock(),
     event = { type: 'FIRE' };
   using actor = createTestActor(
@@ -205,13 +205,13 @@ it('explicit commands override untraced schedules using the same event', async (
   ).resolves.toEqual({ outcome: 'completed', hadError: false });
   clock.increment(10);
   await Promise.resolve();
-  expect(spansNamed('actorium.xstate.scheduled')).toHaveLength(0);
-  expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
+  expect(spansNamed('actorium.xstate.timer_operation')).toHaveLength(0);
+  expect(internals(tracing).timersByActor.has(actor)).toBe(false);
 });
 
 it('links timers sharing one event object to their actual origin in firing order', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const clock = new SimulatedClock(),
     event = { type: 'FIRE' };
@@ -229,15 +229,15 @@ it('links timers sharing one event object to their actual origin in firing order
   const fast = tracing.sendCommand(actor, { type: 'FAST' }, { name: 'fast' });
   await fast.finished;
   clock.increment(10);
-  await tracing.settle();
-  expect(spanNames()).toContain('actorium.xstate.scheduled');
-  let scheduled = spansNamed('actorium.xstate.scheduled');
+  await tracing.waitForBookkeeping();
+  expect(spanNames()).toContain('actorium.xstate.timer_operation');
+  let scheduled = spansNamed('actorium.xstate.timer_operation');
   expect(scheduled[0]?.links[0]?.context.spanId).toBe(fast.spanId);
-  expect(scheduled[0]?.attributes['actorium.xstate.scheduled.delay_ms']).toBe(10);
+  expect(scheduled[0]?.attributes['actorium.xstate.timer.delay_ms']).toBe(10);
   clock.increment(10);
-  await tracing.settle();
-  expect(spansNamed('actorium.xstate.scheduled')).toHaveLength(2);
-  scheduled = spansNamed('actorium.xstate.scheduled');
+  await tracing.waitForBookkeeping();
+  expect(spansNamed('actorium.xstate.timer_operation')).toHaveLength(2);
+  scheduled = spansNamed('actorium.xstate.timer_operation');
   expect(scheduled[1]?.links[0]?.context.spanId).toBe(slow.spanId);
 });
 
@@ -245,7 +245,7 @@ it('uses the actor clock for linked firing while real time advances', async () =
   vi.useFakeTimers();
   try {
     const tracing = new XStateTracing(tracer, {
-      scheduledWorkPolicy: { mode: 'new-linked-operation' },
+      timerPolicy: { mode: 'new-linked-operation' },
     });
     const clock = new SimulatedClock();
     using actor = createTestActor(
@@ -255,22 +255,24 @@ it('uses the actor clock for linked firing while real time advances', async () =
     const command = tracing.sendCommand(actor, { type: 'RUN' }, { name: 'actor.clock' });
     await expect(command.finished).resolves.toEqual({ outcome: 'completed', hadError: false });
     await vi.advanceTimersByTimeAsync(20);
-    expect(spansNamed('actorium.xstate.scheduled')).toHaveLength(0);
+    expect(spansNamed('actorium.xstate.timer_operation')).toHaveLength(0);
     clock.increment(1);
     await Promise.resolve();
-    expect(getSpan('actorium.xstate.scheduled').links[0]?.context.spanId).toBe(command.spanId);
+    expect(getSpan('actorium.xstate.timer_operation').links[0]?.context.spanId).toBe(
+      command.spanId,
+    );
   } finally {
     vi.useRealTimers();
   }
 });
 
 it('rejects the retired bounded policy in types and diagnoses it as untraced at runtime', async () => {
-  // @ts-expect-error Bounded timer continuations are outside the public contract.
-  const policy: ScheduledWorkPolicy = { mode: 'bounded-continuation', maxDurationMs: 5 };
+  // @ts-expect-error A bounded timer mode is outside the public contract.
+  const policy: TimerPolicy = { mode: 'bounded', maxDurationMs: 5 };
   const diagnostics = vi.fn();
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: policy,
-    onTelemetryError: diagnostics,
+    timerPolicy: policy,
+    onDiagnostic: diagnostics,
   });
   const clock = new SimulatedClock();
   let received = 0;
@@ -285,14 +287,14 @@ it('rejects the retired bounded policy in types and diagnoses it as untraced at 
   ).start();
   await tracing.sendCommand(actor, { type: 'RUN' }, { name: 'retired.policy' }).finished;
   expect(diagnostics).toHaveBeenCalledWith({
-    phase: 'scheduledWorkPolicy',
+    phase: 'timerPolicy',
     error: expect.any(TypeError),
   });
   clock.increment(1);
   await Promise.resolve();
   expect(received).toBe(1);
-  expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
-  expect(spansNamed('actorium.xstate.scheduled')).toHaveLength(0);
+  expect(internals(tracing).timersByActor.has(actor)).toBe(false);
+  expect(spansNamed('actorium.xstate.timer_operation')).toHaveLength(0);
 });
 
 it('diagnoses a non-string scheduled name and keeps business delivery untraced', async () => {
@@ -300,10 +302,10 @@ it('diagnoses a non-string scheduled name and keeps business delivery untraced',
   const policy = {
     mode: 'new-linked-operation',
     name: { retained: 'application data' },
-  } as unknown as ScheduledWorkPolicy;
+  } as unknown as TimerPolicy;
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: policy,
-    onTelemetryError: diagnostics,
+    timerPolicy: policy,
+    onDiagnostic: diagnostics,
   });
   const clock = new SimulatedClock();
   let received = 0;
@@ -320,21 +322,21 @@ it('diagnoses a non-string scheduled name and keeps business delivery untraced',
   clock.increment(1);
   expect(received).toBe(1);
   expect(diagnostics).toHaveBeenCalledWith({
-    phase: 'scheduledWorkPolicy',
+    phase: 'timerPolicy',
     error: expect.any(TypeError),
   });
-  expect(spansNamed('actorium.xstate.scheduled')).toHaveLength(0);
+  expect(spansNamed('actorium.xstate.timer_operation')).toHaveLength(0);
 });
 
 it('isolates policy and diagnostic-hook failures while delivering the timer', async () => {
-  const onTelemetryError = vi.fn(() => {
+  const onDiagnostic = vi.fn(() => {
     throw new Error('diagnostics failed');
   });
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: () => {
+    timerPolicy: () => {
       throw new Error('policy failed');
     },
-    onTelemetryError,
+    onDiagnostic,
   });
   const clock = new SimulatedClock();
   let received = 0;
@@ -353,15 +355,15 @@ it('isolates policy and diagnostic-hook failures while delivering the timer', as
   clock.increment(1);
   expect(received).toBe(1);
   expect(actor.getSnapshot().status).toBe('active');
-  expect(spansNamed('actorium.xstate.scheduled')).toHaveLength(0);
-  expect(onTelemetryError).toHaveBeenCalledWith({
-    phase: 'scheduledWorkPolicy',
+  expect(spansNamed('actorium.xstate.timer_operation')).toHaveLength(0);
+  expect(onDiagnostic).toHaveBeenCalledWith({
+    phase: 'timerPolicy',
     error: expect.any(Error),
   });
 });
 
 it('suppresses unrelated command ownership when a supported clock fires reentrantly', async () => {
-  const tracing = new XStateTracing(tracer, { scheduledWorkPolicy: { mode: 'untraced' } });
+  const tracing = new XStateTracing(tracer, { timerPolicy: { mode: 'untraced' } });
   const clock = new SimulatedClock(),
     implementation = vi.fn(async () => 'done');
   const work = tracing.fromPromise<string, object>('timer.reentrant.work', implementation);
@@ -406,8 +408,8 @@ it.each(['new-linked-operation', 'untraced'] as const)(
       }),
     };
     const tracing = new XStateTracing(tracer, {
-      scheduledWorkPolicy: { mode },
-      onTelemetryError: diagnostics,
+      timerPolicy: { mode },
+      onDiagnostic: diagnostics,
     });
     let received = 0;
     using actor = createTestActor(
@@ -427,16 +429,16 @@ it.each(['new-linked-operation', 'untraced'] as const)(
     simulated.increment(1);
     await Promise.resolve();
     expect(received).toBe(1);
-    expect(internals(tracing).scheduledByActor.has(actor)).toBe(false);
+    expect(internals(tracing).timersByActor.has(actor)).toBe(false);
     expect(clock.clearTimeout).not.toHaveBeenCalled();
     expect(diagnostics).not.toHaveBeenCalled();
-    expect(spansNamed('actorium.xstate.scheduled')).toHaveLength(mode === 'untraced' ? 0 : 1);
+    expect(spansNamed('actorium.xstate.timer_operation')).toHaveLength(mode === 'untraced' ? 0 : 1);
   },
 );
 
 it('ends the origin before the timer and keeps linked finite work open until settlement', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: {
+    timerPolicy: {
       mode: 'new-linked-operation',
       name: 'timer.linked',
     },
@@ -481,7 +483,7 @@ it('ends the origin before the timer and keeps linked finite work open until set
   expect(spanNames()).not.toContain('timer.linked');
   result.resolve('done');
   await waitFor(actor, (snapshot) => snapshot.matches('done'));
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   const linked = getSpan('timer.linked');
   expect(linked.links[0]?.context.spanId).toBe(command.spanId);
   expect(getSpan('timer.linked_work').parentSpanContext?.spanId).toBe(linked.spanContext().spanId);
@@ -489,7 +491,7 @@ it('ends the origin before the timer and keeps linked finite work open until set
 
 it('cancels a linked timer without changing the originating command outcome', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: {
+    timerPolicy: {
       mode: 'new-linked-operation',
     },
   });
@@ -524,12 +526,12 @@ it('cancels a linked timer without changing the originating command outcome', as
   });
   clock.increment(10);
   expect(actor.getSnapshot().matches('idle')).toBe(true);
-  expect(spanNames()).not.toContain('actorium.xstate.scheduled');
+  expect(spanNames()).not.toContain('actorium.xstate.timer_operation');
 });
 
 it('starts linked work after a long delay without holding the origin open', async () => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: {
+    timerPolicy: {
       mode: 'new-linked-operation',
       name: 'timer.later',
     },
@@ -569,7 +571,7 @@ it('starts linked work after a long delay without holding the origin open', asyn
   });
   clock.increment(50);
   await waitFor(actor, (snapshot) => snapshot.matches('done'));
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
 
   const lateOperation = getSpan('timer.later');
   expect(lateOperation.links[0]?.context.spanId).toBe(command.spanId);
@@ -585,7 +587,7 @@ it.each([
   { mode: 'raise' as const, delay: 0 },
 ])('starts a linked operation for delayed $mode work at $delay ms', async ({ mode, delay }) => {
   const tracing = new XStateTracing(tracer, {
-    scheduledWorkPolicy: () => ({
+    timerPolicy: () => ({
       mode: 'new-linked-operation',
       name: `timer.${mode}.scheduled`,
     }),
@@ -630,7 +632,7 @@ it.each([
 
   clock.increment(delay);
   await waitFor(actor, (snapshot) => snapshot.matches('done'));
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
 
   const scheduled = getSpan(`timer.${mode}.scheduled`);
   const workSpan = getSpan('timer.work');
