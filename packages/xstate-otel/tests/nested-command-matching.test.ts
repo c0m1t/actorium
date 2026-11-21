@@ -74,6 +74,9 @@ describe('a command nested in another send of the same event object to the same 
 
   it('swaps processing owners from a later inspector, a documented gap', () =>
     // The outer delivery is mirrored before the nested one, but XState accepts
-    // the nested one first. Only private Actor._send would reveal acceptance.
+    // the nested one first. The mirror records deliveries in inspection order,
+    // so it can't tell this from an actor resending the object to itself while
+    // processing. Tracking active sendCommand calls could separate the two for
+    // commands, but not for plain relays.
     nested('later inspector', { inner: ['two'], outer: ['one'] }));
 });
