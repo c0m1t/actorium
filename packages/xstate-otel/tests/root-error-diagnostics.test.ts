@@ -10,7 +10,14 @@ import {
 } from 'xstate';
 import { expect, it, vi } from 'vitest';
 import { XStateTracing, type TelemetryDiagnostic } from '../src/index.js';
-import { deferred, createTestActor, internals, useTestTracer, expectReleased } from './helpers.js';
+import {
+  deferred,
+  createTestActor,
+  internals,
+  useTestTracer,
+  expectReleased,
+  expectStoppedActorWarnings,
+} from './helpers.js';
 
 const { tracer, spans, spanNames, getSpan } = useTestTracer('root-error-diagnostics');
 // A failed root also drops its lifecycle check.
@@ -144,7 +151,7 @@ it('waits for startup before reporting an initial context error', async () => {
     }),
     { inspect: tracing.inspect },
   );
-  await tracing.sendCommand(actor, { type: 'RUN' }, { name: 'prestart.dropped' }).finished;
+  await tracing.sendCommand(actor, { type: 'RUN' }, { name: 'prestart.terminal' }).finished;
   expect(diagnostic).not.toHaveBeenCalled();
   const onError = vi.fn();
   actor.subscribe({ error: onError });
@@ -156,7 +163,8 @@ it('waits for startup before reporting an initial context error', async () => {
     error: failure,
   });
   expect(onError).toHaveBeenCalledExactlyOnceWith(failure);
-  expect(spans()[0]?.attributes['actorium.xstate.operation.outcome']).toBe('dropped');
+  expect(spans()[0]?.attributes['actorium.xstate.operation.outcome']).toBe('target_terminal');
+  expect(spans()[0]?.attributes['actorium.xstate.operation.outcome_reason']).toBe('error');
 });
 
 it('preserves associated failure spans and cleanup with immediate stop', async () => {
@@ -318,9 +326,14 @@ it('preserves the failing command when an application observer sends reentrant w
   actor.subscribe({ error: onError });
   actor.start();
   await expect(
-    tracing.sendCommand(actor, { type: 'FAIL' }, { name: 'original' }).finished,
+    expectStoppedActorWarnings(actor, ['RUN'], () =>
+      tracing.sendCommand(actor, { type: 'FAIL' }, { name: 'original' }),
+    ).finished,
   ).resolves.toEqual({ outcome: 'failed', hadError: true });
-  await expect(reentrant?.finished).resolves.toEqual({ outcome: 'dropped', hadError: false });
+  await expect(reentrant?.finished).resolves.toEqual({
+    outcome: 'target_terminal',
+    hadError: false,
+  });
   expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
     phase: 'associatedRootError',
     error: failure,
@@ -345,8 +358,10 @@ it('cleans a running child whose stopped snapshot remains active', async () => {
   actor.send({ type: 'STOP' });
   expect(child.getSnapshot().status).toBe('active');
   await expect(
-    tracing.sendCommand(child, { type: 'RUN' }, { name: 'stopped.child' }).finished,
-  ).resolves.toEqual({ outcome: 'dropped', hadError: false });
+    expectStoppedActorWarnings(child, ['RUN'], () =>
+      tracing.sendCommand(child, { type: 'RUN' }, { name: 'stopped.child' }),
+    ).finished,
+  ).resolves.toEqual({ outcome: 'target_terminal', hadError: false });
   expectClean(tracing, child);
 });
 

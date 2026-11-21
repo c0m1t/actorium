@@ -2,24 +2,24 @@
 
 ## Supported
 
-| Case                                        | Behaviour                                                                 |
-| ------------------------------------------- | ------------------------------------------------------------------------- |
-| Reentrant mixed traffic                     | Traced and untraced events keep their own owners in mailbox order         |
-| Same event object sent again                | Each send is a separate delivery; commands match by object and recipient  |
-| Shared, frozen, callable or primitive input | Passed through unchanged; ownership comes from the creating actor         |
-| Parallel Promise work                       | Each joins; the operation ends after the last is handed back              |
-| `onDone`/`onError` starts more work         | The new work joins before the old work is released                        |
-| Nested invoked or spawned machine           | Its initialization and initial Promise work join the creating command     |
-| Immediate `raise` and `always`              | Same macrostep, same operation                                            |
-| `sendTo`/`sendParent` chains                | One operation across actors observed by the same runtime                  |
-| Commands before `start()`                   | Each owns its own delivery after initialization; startup work is separate |
-| Startup failure or stop before start        | Queued commands finish `cancelled`, without the startup error             |
-| Relay to a stopped actor                    | A dropped delivery on the span; the outcome is unchanged                  |
-| Handled Promise rejection                   | `completed` with `hadError`; the work span is `ERROR`                     |
-| Target actor failure                        | `failed`; XState's native error reporting is unchanged                    |
-| Command to a stopped actor                  | `dropped`                                                                 |
-| Promise stopped by leaving its state        | Signal aborted, work span `cancelled`, operation `cancelled`              |
-| Delay of `0`                                | Still scheduled work, not an immediate relay                              |
+| Case                                        | Behaviour                                                                                            |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Reentrant mixed traffic                     | Traced and untraced events keep their own owners in mailbox order                                    |
+| Same event object sent again                | Each send is a separate delivery; commands match by object and recipient                             |
+| Shared, frozen, callable or primitive input | Passed through unchanged; ownership comes from the creating actor                                    |
+| Parallel Promise work                       | Each joins; the operation ends after the last is handed back                                         |
+| `onDone`/`onError` starts more work         | The new work joins before the old work is released                                                   |
+| Nested invoked or spawned machine           | Its initialization and initial Promise work join the creating command                                |
+| Immediate `raise` and `always`              | Same macrostep, same operation                                                                       |
+| `sendTo`/`sendParent` chains                | One operation across actors observed by the same runtime                                             |
+| Commands before `start()`                   | Each owns its own delivery after initialization; startup work is separate                            |
+| Startup failure or stop before start        | Queued commands finish `cancelled`, without the startup error                                        |
+| Relay to a terminal actor                   | [Recorded on the span](../reference/outcomes.md#relays-to-terminal-actors); the outcome is unchanged |
+| Handled Promise rejection                   | `completed` with `hadError`; the work span is `ERROR`                                                |
+| Target actor failure                        | `failed`; XState's native error reporting is unchanged                                               |
+| Command to a terminal or unobserved actor   | Sent natively; see [outcomes](../reference/outcomes.md)                                              |
+| Promise stopped by leaving its state        | Signal aborted, work span `cancelled`, operation `cancelled`                                         |
+| Delay of `0`                                | Still scheduled work, not an immediate relay                                                         |
 
 ## Known gaps
 

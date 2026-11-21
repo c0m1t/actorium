@@ -72,7 +72,7 @@ export const scenarios: readonly Scenario[] = [
     id: 'closed-order',
     title: 'Command to a closed order',
     shows:
-      'The order has reached a final state, so a late cancel is never delivered: [`dropped`](reference/outcomes#outcomes).',
+      'The order has reached a final state, so XState refuses a late cancel: [`target_terminal`](reference/outcomes#outcomes).',
     async run({ desk }) {
       const { orderId, command } = desk.place({ ...tea, card: 'tok_ok' });
       await command.finished;

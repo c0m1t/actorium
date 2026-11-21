@@ -35,10 +35,11 @@ sequenceDiagram
 `sendCommand` creates the span and remembers the exact event object together
 with the target actor, then calls `actor.send`. The first matching
 `@xstate.event` inspection claims the operation, so the same event object can
-be sent several times without confusion. If no delivery is observed, because
-the target is stopped or not inspected by this runtime, the operation is
-`dropped`. If `send` throws, the runtime removes that operation's deliveries
-from its records, finishes it `failed` and rethrows.
+be sent several times without confusion. The runtime always calls `send`,
+even for a terminal target. When the send is not counted, the operation ends
+with an outcome and reason from [outcomes](../reference/outcomes.md). If
+`send` throws, the runtime removes that operation's deliveries from its
+records, finishes it `failed` and rethrows.
 
 ## 2. Count every delivery
 
@@ -95,9 +96,10 @@ Callers act on `finished`, so each outcome has one meaning:
 - `cancelled` means work the command had started was abandoned: queued
   deliveries discarded by stop or error, commands discarded by stopping a
   root before `start()`, or traced Promise work stopped before it settled.
-- A relay refused by an already stopped actor is not abandoned work. The
-  command's own work completed, and a caller that retried on `cancelled` would
-  repeat a command that took effect. It is recorded as a dropped delivery
+- A relay to an already terminal actor is not abandoned work. The command's
+  own work completed, and a caller that retried on `cancelled` would repeat a
+  command that took effect. It is
+  [recorded on the span](../reference/outcomes.md#relays-to-terminal-actors)
   instead.
 - A failure of the target actor is always `failed`. A child failure that the
   parent handled is `completed` with `hadError`. This keeps a crashed actor

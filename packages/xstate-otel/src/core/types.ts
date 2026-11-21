@@ -72,7 +72,13 @@ export type CommandEvent<TActor extends AnyActorRef> =
       : TEvent
     : AnyEventObject;
 
-export type CommandOutcome = 'completed' | 'cancelled' | 'dropped' | 'failed';
+/** See the outcomes reference for definitions, reasons and precedence. */
+export type CommandOutcome =
+  | 'completed'
+  | 'cancelled'
+  | 'failed'
+  | 'target_terminal'
+  | 'unobserved';
 
 export interface CommandResult {
   readonly outcome: CommandOutcome;

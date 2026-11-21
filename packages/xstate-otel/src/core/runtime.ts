@@ -19,7 +19,10 @@ import { ScheduledWork, type ScheduledDelivery } from './scheduled-work.js';
 import type {
   OperationStart,
   OperationTelemetry,
+  OutcomeReason,
   TelemetryBackend,
+  TerminalReason,
+  UnobservedReason,
   WorkTelemetry,
 } from './telemetry.js';
 import type {
@@ -30,6 +33,21 @@ import type {
   PromiseActorArgs,
   ShouldTraceArgs,
 } from './types.js';
+
+/**
+ * What is known about a command's initiating send. `unobserved` is provisional
+ * until the send returns normally; a matching inspection replaces it.
+ */
+type InitiatingEventState =
+  | { status: 'unobserved'; reason: UnobservedReason }
+  | { status: 'counted' }
+  | { status: 'terminal'; reason: TerminalReason };
+
+/** A command waiting for the matching, synchronously emitted @xstate.event. */
+interface PendingCommand {
+  readonly operation: Operation;
+  state: InitiatingEventState;
+}
 
 interface BookkeepingGroup {
   pending: number;
@@ -62,7 +80,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
   private readonly terminalActors = new WeakSet<AnyActorRef>();
   private readonly scheduledWork: ScheduledWork;
   /** Commands waiting for the matching, synchronously emitted @xstate.event. */
-  private readonly pendingCommands = new WeakMap<object, Operation[]>();
+  private readonly pendingCommands = new WeakMap<object, PendingCommand[]>();
   private readonly actorOperations = new WeakMap<ActorRefLike, ActorOperation>();
   private readonly actorContinuations = new WeakMap<AnyActorRef, Continuation>();
 
@@ -170,23 +188,40 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
         }
         this.deferLifecycleCheck(inspection.actorRef as AnyActorRef);
         // Native initialization still runs for restored/initial error or done
-        // snapshots. It is not a discarded send to an already stopped actor.
-        if (
-          inspection.event.type !== 'xstate.init' &&
-          this.isStopped(inspection.actorRef as AnyActorRef)
-        ) {
-          // XState refuses the relay at send time. Nothing was accepted for the
-          // operation, so record the drop without changing its outcome.
+        // snapshots. It is not a send to an already terminal actor.
+        const terminalReason =
+          inspection.event.type === 'xstate.init'
+            ? undefined
+            : this.terminalReason(inspection.actorRef as AnyActorRef);
+        if (terminalReason) {
+          // XState emits this inspection before its own status check. A started
+          // target refuses the event; a not-yet-started one with an errored or
+          // done snapshot enqueues it and start() discards it. Neither is
+          // processing this runtime counts.
+          const command = this.shiftPendingCommand(inspection.event, inspection.actorRef);
+          if (command) {
+            command.state = { status: 'terminal', reason: terminalReason };
+            return;
+          }
+          // A relay never changes its owning operation's outcome.
           const operation = this.operationForIncomingEvent(inspection.event, inspection.sourceRef);
           if (operation && !operation.ended) {
-            operation.droppedDeliveries++;
-            operation.telemetry.droppedDelivery(inspection.actorRef, inspection.event);
+            operation.terminalRecipientEvents++;
+            operation.telemetry.recipientTerminal(
+              inspection.actorRef,
+              inspection.event,
+              terminalReason,
+            );
           }
           return;
         }
         // An explicit command always owns its delivery. Only a clock callback
         // registered by the public scheduler can claim a scheduling record.
-        const directlyAssociated = this.shiftPendingCommand(inspection.event, inspection.actorRef);
+        const command = this.shiftPendingCommand(inspection.event, inspection.actorRef);
+        if (command) {
+          command.state = { status: 'counted' };
+        }
+        const directlyAssociated = command?.operation;
         const scheduled = dispatch?.scheduled;
         const operation =
           directlyAssociated ??
@@ -211,7 +246,6 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
         }
 
         if (operation) {
-          operation.deliveryObserved = true;
           operation.pendingDeliveries += 1;
         }
 
@@ -302,28 +336,37 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     });
     const commandTrace = this.commandTrace(operation);
 
-    if (this.isStopped(actor)) {
-      this.finishOperation(operation, 'dropped');
-      return commandTrace;
-    }
-
-    this.pushPendingCommand(event, operation);
+    // Always send, so the target keeps XState's native behaviour for terminal
+    // actors. Inspection during the send refines what is known beforehand.
+    const terminalReason = this.terminalReason(actor);
+    const command: PendingCommand = {
+      operation,
+      state: terminalReason
+        ? { status: 'terminal', reason: terminalReason }
+        : {
+            status: 'unobserved',
+            reason: this.observedActors.has(actor) ? 'send_not_observed' : 'target_not_observed',
+          },
+    };
+    this.pushPendingCommand(event, command);
 
     try {
       actor.send(event);
     } catch (error) {
-      this.removePendingCommand(event, operation);
+      this.removePendingCommand(event, command);
       this.rollbackCommandDeliveries(actor, operation);
       this.failOperation(operation, error);
       throw error;
     }
 
-    this.removePendingCommand(event, operation);
+    this.removePendingCommand(event, command);
 
-    // Sending to a stopped actor is a no-op in XState. Do not leak an open span
-    // when no @xstate.event was emitted for the command.
-    if (!operation.deliveryObserved) {
-      this.finishOperation(operation, 'dropped');
+    // Counted processing finishes the operation through normal completion.
+    const { state } = command;
+    if (state.status === 'terminal') {
+      this.finishOperation(operation, 'target_terminal', state.reason);
+    } else if (state.status === 'unobserved') {
+      this.finishOperation(operation, 'unobserved', state.reason);
     }
 
     return commandTrace;
@@ -445,9 +488,8 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
       cancelled: false,
       hadError: false,
       errorCount: 0,
-      droppedDeliveries: 0,
+      terminalRecipientEvents: 0,
       rootFailed: false,
-      deliveryObserved: false,
       finished,
       resolveFinished,
     };
@@ -694,8 +736,15 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     this.actorOperations.delete(actor);
   }
 
-  private isStopped(actor: AnyActorRef): boolean {
-    return this.stoppedActors.has(actor) || actor.getSnapshot().status !== 'active';
+  /**
+   * Why the actor is known to be terminal, or undefined. Only registered actors
+   * can be in stoppedActors, so for others the snapshot is the only evidence:
+   * a stopped actor whose snapshot still says `active` is not found terminal.
+   */
+  private terminalReason(actor: AnyActorRef): TerminalReason | undefined {
+    const status = actor.getSnapshot().status;
+    if (status === 'done' || status === 'error' || status === 'stopped') return status;
+    return this.stoppedActors.has(actor) ? 'stopped' : undefined;
   }
 
   private stopObservedActor(actor: AnyActorRef): void {
@@ -757,31 +806,32 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     }
   }
 
-  private pushPendingCommand(event: AnyEventObject, operation: Operation): void {
+  private pushPendingCommand(event: AnyEventObject, command: PendingCommand): void {
     const pending = this.pendingCommands.get(event) ?? [];
-    pending.push(operation);
+    pending.push(command);
     this.pendingCommands.set(event, pending);
   }
 
+  /** Matches and consumes the first command for this exact event and recipient. */
   private shiftPendingCommand(
     event: AnyEventObject,
     recipient: ActorRefLike,
-  ): Operation | undefined {
+  ): PendingCommand | undefined {
     const pending = this.pendingCommands.get(event);
-    const index = pending?.findIndex((operation) => operation.rootActor === recipient) ?? -1;
-    const operation = index === -1 ? undefined : pending?.splice(index, 1)[0];
+    const index = pending?.findIndex(({ operation }) => operation.rootActor === recipient) ?? -1;
+    const command = index === -1 ? undefined : pending?.splice(index, 1)[0];
     if (pending?.length === 0) {
       this.pendingCommands.delete(event);
     }
-    return operation;
+    return command;
   }
 
-  private removePendingCommand(event: AnyEventObject, operation: Operation): void {
+  private removePendingCommand(event: AnyEventObject, command: PendingCommand): void {
     const pending = this.pendingCommands.get(event);
     if (!pending) {
       return;
     }
-    const index = pending.indexOf(operation);
+    const index = pending.indexOf(command);
     if (index !== -1) {
       pending.splice(index, 1);
     }
@@ -902,7 +952,11 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     this.finishOperation(operation, 'failed');
   }
 
-  private finishOperation(operation: Operation, outcome: CommandOutcome): void {
+  private finishOperation(
+    operation: Operation,
+    outcome: CommandOutcome,
+    outcomeReason?: OutcomeReason,
+  ): void {
     if (operation.ended) {
       return;
     }
@@ -913,9 +967,10 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     }
     operation.telemetry.end({
       outcome,
+      outcomeReason,
       hadError: operation.hadError,
       errorCount: operation.errorCount,
-      droppedDeliveries: operation.droppedDeliveries,
+      terminalRecipientEvents: operation.terminalRecipientEvents,
     });
     operation.resolveFinished({ outcome, hadError: operation.hadError });
   }

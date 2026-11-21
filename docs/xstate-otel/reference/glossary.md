@@ -17,12 +17,11 @@ Promise's start until its parent has handled the done or error event.
 **Delivery.** One event received and processed by one actor. The runtime
 counts deliveries, not event types.
 
-**Outcome.** The value of `finished`: `completed`, `cancelled`, `dropped` or
-`failed`. See [outcomes](outcomes.md).
+**Outcome.** How the tracing lifecycle of a command ended, the value of
+`finished`. [Outcomes](outcomes.md#outcomes) lists and defines each one.
 
-**Dropped delivery.** A relay refused because its recipient was already
-stopped. It is recorded on the operation span and does not change the
-outcome.
+**Terminal recipient.** The recipient of a relay that was already done,
+errored or stopped. See [relays to terminal actors](outcomes.md#relays-to-terminal-actors).
 
 **Scheduled operation.** An operation started by a timer firing, linked to the
 operation that scheduled the timer.

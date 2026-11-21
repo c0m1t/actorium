@@ -58,8 +58,8 @@ later message or a subscription event. Give those their own command, or use
 | `spanId`      | Span ID of the operation span                               |
 | `finished`    | Resolves with `{ outcome, hadError }` when the work settled |
 
-`finished` never rejects. Its `outcome` is `completed`, `cancelled`, `dropped`
-or `failed`; [outcomes](../reference/outcomes.md) defines each one. An
+`finished` never rejects. [Outcomes](../reference/outcomes.md) defines each
+`outcome` it can resolve with. An
 operation can complete while the business failed, for example when an
 `onError` transition leads to a failure state. Read the snapshot, as in the
 example above, or use an application reply for the business result.

@@ -26,11 +26,21 @@ export type OperationStart<TCommandOptions> =
       readonly delayMs: number;
     };
 
+/** Why a target was terminal when an event was sent to it. */
+export type TerminalReason = 'done' | 'error' | 'stopped';
+
+/** Why the runtime couldn't link a command's send to counted processing. */
+export type UnobservedReason = 'target_not_observed' | 'send_not_observed';
+
+/** Set only for the `target_terminal` and `unobserved` outcomes. */
+export type OutcomeReason = TerminalReason | UnobservedReason;
+
 export interface OperationSummary {
   readonly outcome: CommandOutcome;
+  readonly outcomeReason: OutcomeReason | undefined;
   readonly hadError: boolean;
   readonly errorCount: number;
-  readonly droppedDeliveries: number;
+  readonly terminalRecipientEvents: number;
 }
 
 export interface WorkStart<TWorkOptions> {
@@ -47,7 +57,7 @@ export interface OperationTelemetry {
   link(): TelemetryLink;
   run<T>(callback: () => T): T;
   microstep(actor: ActorRefLike, event: AnyEventObject, stateValue: () => unknown): void;
-  droppedDelivery(recipient: ActorRefLike, event: AnyEventObject): void;
+  recipientTerminal(recipient: ActorRefLike, event: AnyEventObject, reason: TerminalReason): void;
   /** Records a failure at most once; false when skipped or ended meanwhile. */
   recordFailure(error: unknown, isEnded: () => boolean): boolean;
   end(summary: OperationSummary): void;

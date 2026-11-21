@@ -11,7 +11,13 @@ import {
 } from 'xstate';
 import { expect, it, vi } from 'vitest';
 import { XStateTracing, type CommandTrace } from '../src/index.js';
-import { deferred, createTestActor, internals, useTestTracer } from './helpers.js';
+import {
+  deferred,
+  createTestActor,
+  expectStoppedActorWarnings,
+  internals,
+  useTestTracer,
+} from './helpers.js';
 
 const { tracer, spans, spanNames, spansNamed, getSpan } = useTestTracer('prestart', {
   contextManager: true,
@@ -302,14 +308,16 @@ it('cancels unprocessed pre-start commands when unrelated root initialization fa
   });
 });
 
-it('cancels commands abandoned by stop before start and drops later commands', async () => {
+it('cancels commands abandoned by stop before start and refuses later commands', async () => {
   const tracing = new XStateTracing(tracer);
   using actor = createTestActor(setup({}).createMachine({}), { inspect: tracing.inspect });
   const first = tracing.sendCommand(actor, { type: 'RUN' }, { name: 'before.start' });
   actor.stop();
   await expect(first.finished).resolves.toEqual({ outcome: 'cancelled', hadError: false });
   await expect(
-    tracing.sendCommand(actor, { type: 'RUN' }, { name: 'after.stop' }).finished,
-  ).resolves.toEqual({ outcome: 'dropped', hadError: false });
+    expectStoppedActorWarnings(actor, ['RUN'], () =>
+      tracing.sendCommand(actor, { type: 'RUN' }, { name: 'after.stop' }),
+    ).finished,
+  ).resolves.toEqual({ outcome: 'target_terminal', hadError: false });
   expect(internals(tracing).processing.has(actor)).toBe(false);
 });

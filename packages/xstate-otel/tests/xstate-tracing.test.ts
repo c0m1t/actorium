@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createCheckout } from './fixtures/checkout/create-checkout.js';
 import type { Basket, CheckoutServices, Product } from './fixtures/checkout/checkout.machine.js';
 import { XStateTracing, createXStateTracing } from '../src/index.js';
-import { deferred, createTestActor, useTestTracer } from './helpers.js';
+import { deferred, createTestActor, expectStoppedActorWarnings, useTestTracer } from './helpers.js';
 
 const { tracer, spansNamed, spanNames, getSpan } = useTestTracer('xstate-tracing', {
   contextManager: true,
@@ -220,7 +220,7 @@ describe('commands', () => {
     expect(onError).toHaveBeenCalledExactlyOnceWith(actor.getSnapshot().error);
   });
 
-  it('ends a command as dropped when it is sent to a stopped actor', () => {
+  it('ends a command as target_terminal when it is sent to a stopped actor', () => {
     const tracing = new XStateTracing(tracer);
     using actor = createTestActor(
       setup({
@@ -230,9 +230,13 @@ describe('commands', () => {
     ).start();
 
     actor.stop();
-    tracing.sendCommand(actor, { type: 'PING' }, { name: 'command.ping' });
+    expectStoppedActorWarnings(actor, ['PING'], () =>
+      tracing.sendCommand(actor, { type: 'PING' }, { name: 'command.ping' }),
+    );
 
-    expect(getSpan('command.ping').attributes['actorium.xstate.operation.outcome']).toBe('dropped');
+    const span = getSpan('command.ping');
+    expect(span.attributes['actorium.xstate.operation.outcome']).toBe('target_terminal');
+    expect(span.attributes['actorium.xstate.operation.outcome_reason']).toBe('stopped');
   });
 
   it('handles a command queued before actor.start()', async () => {

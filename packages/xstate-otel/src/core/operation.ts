@@ -15,10 +15,9 @@ export interface Operation {
   hadError: boolean;
   /** Failed work/operation records, counted once each. */
   errorCount: number;
-  /** Relays refused at send time by stopped observed recipients. */
-  droppedDeliveries: number;
+  /** Relays whose observed recipient was already terminal when they were sent. */
+  terminalRecipientEvents: number;
   rootFailed: boolean;
-  deliveryObserved: boolean;
   readonly finished: Promise<CommandResult>;
   readonly resolveFinished: (result: CommandResult) => void;
 }

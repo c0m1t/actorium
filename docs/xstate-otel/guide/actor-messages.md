@@ -18,9 +18,8 @@ in the same system, or roots that each use the same `tracing.inspect`.
 Messages to an actor that another runtime or process observes are not
 counted; start a command at that boundary instead.
 
-A relay to an actor that is already stopped is refused by XState. It is
-recorded on the operation span as a `delivery.dropped` event and counted in
-`operation.dropped_delivery_count`; it does not change the outcome.
+A relay to an actor that is already terminal does not change the outcome;
+see [relays to terminal actors](../reference/outcomes.md#relays-to-terminal-actors).
 
 ## Direct `send` calls
 

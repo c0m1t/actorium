@@ -258,11 +258,17 @@ it('discards late payloads and settles relays to stopped children', async () => 
   const span = getSpan('stopped.relay');
   expect(span.status.code).toBe(SpanStatusCode.UNSET);
   expect(span.attributes['actorium.xstate.operation.outcome']).toBe('completed');
-  expect(span.attributes['actorium.xstate.operation.dropped_delivery_count']).toBe(1);
+  expect(span.attributes['actorium.xstate.operation.terminal_recipient_event_count']).toBe(1);
   expect(span.attributes['actorium.xstate.operation.had_error']).toBeUndefined();
-  expect(span.events.filter((event) => event.name === 'actorium.xstate.delivery.dropped')).toEqual([
+  expect(
+    span.events.filter((event) => event.name === 'actorium.xstate.event.recipient_terminal'),
+  ).toEqual([
     expect.objectContaining({
-      attributes: { 'actorium.xstate.actor.id': 'worker', 'actorium.xstate.event.type': 'WORK' },
+      attributes: {
+        'actorium.xstate.actor.id': 'worker',
+        'actorium.xstate.event.type': 'WORK',
+        'actorium.xstate.event.terminal_reason': 'stopped',
+      },
     }),
   ]);
 });
@@ -291,14 +297,22 @@ it('completes an operation whose relay to a child stopped in the same macrostep 
   );
   await expect(command.finished).resolves.toEqual({ outcome: 'completed', hadError: false });
   const span = getSpan('same.macrostep');
-  expect(span.attributes['actorium.xstate.operation.dropped_delivery_count']).toBe(2);
+  expect(span.attributes['actorium.xstate.operation.terminal_recipient_event_count']).toBe(2);
   expect(
     span.events
-      .filter((event) => event.name === 'actorium.xstate.delivery.dropped')
+      .filter((event) => event.name === 'actorium.xstate.event.recipient_terminal')
       .map((event) => event.attributes),
   ).toEqual([
-    { 'app.actor': 'worker', 'actorium.xstate.event.type': 'WORK' },
-    { 'app.actor': 'worker', 'actorium.xstate.event.type': 'MORE' },
+    {
+      'app.actor': 'worker',
+      'actorium.xstate.event.type': 'WORK',
+      'actorium.xstate.event.terminal_reason': 'stopped',
+    },
+    {
+      'app.actor': 'worker',
+      'actorium.xstate.event.type': 'MORE',
+      'actorium.xstate.event.terminal_reason': 'stopped',
+    },
   ]);
   expect(internals(tracing).processing.has(child)).toBe(false);
   expect(internals(tracing).queued.has(child)).toBe(false);
@@ -340,10 +354,14 @@ it('keeps traced work open and completes it after a refused relay', async () => 
   pending.resolve('done');
   await expect(command.finished).resolves.toEqual({ outcome: 'completed', hadError: false });
   const span = getSpan('relay.with.work');
-  expect(span.attributes['actorium.xstate.operation.dropped_delivery_count']).toBe(1);
+  expect(span.attributes['actorium.xstate.operation.terminal_recipient_event_count']).toBe(1);
   expect(
-    span.events.find((event) => event.name === 'actorium.xstate.delivery.dropped')?.attributes,
-  ).toEqual({ 'actorium.xstate.event.type': 'NOTIFY' });
+    span.events.find((event) => event.name === 'actorium.xstate.event.recipient_terminal')
+      ?.attributes,
+  ).toEqual({
+    'actorium.xstate.event.type': 'NOTIFY',
+    'actorium.xstate.event.terminal_reason': 'stopped',
+  });
 });
 
 it('recognizes stopped transition actors with active snapshots', async () => {
@@ -355,8 +373,13 @@ it('recognizes stopped transition actors with active snapshots', async () => {
   actor.stop();
   expect(actor.getSnapshot().status).toBe('active');
   await expect(
-    tracing.sendCommand(actor, { type: 'RUN' }, { name: 'transition.stopped' }).finished,
-  ).resolves.toEqual({ outcome: 'dropped', hadError: false });
+    expectStoppedActorWarnings(actor, ['RUN'], () =>
+      tracing.sendCommand(actor, { type: 'RUN' }, { name: 'transition.stopped' }),
+    ).finished,
+  ).resolves.toEqual({ outcome: 'target_terminal', hadError: false });
+  expect(getSpan('transition.stopped').attributes['actorium.xstate.operation.outcome_reason']).toBe(
+    'stopped',
+  );
   expectStoppedActorWarnings(actor, ['LATE'], () => actor.send({ type: 'LATE' }));
   expect(internals(tracing).processing.has(actor)).toBe(false);
 });
