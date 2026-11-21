@@ -30,3 +30,32 @@ jobs:
           cache: true
           require-lockfile: true
       - run: pnpm run check
+
+  # The library's tests on the engines.node floor and the newest Node. Vitest
+  # runs directly on the installed Node, since pnpm scripts use the pinned one.
+  node:
+    name: test on Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['24.0.0', latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+        with:
+          cache: true
+          require-lockfile: true
+      - run: pnpm install
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Test
+        working-directory: packages/xstate-otel
+        run: |
+          node --version
+          node node_modules/vitest/vitest.mjs run

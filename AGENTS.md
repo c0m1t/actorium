@@ -9,7 +9,8 @@ pnpm workspace for OpenTelemetry tracing of XState v5 actors:
 - `scripts/`: helpers shared by package scripts.
 
 pnpm runs everything on the Node pinned in `devEngines.runtime`, locally and in CI; the library
-supports Node 24 or later (`engines.node`).
+supports Node 24 or later (`engines.node`), and CI also runs its tests on that floor and on the
+newest Node.
 
 ## Commands
 
