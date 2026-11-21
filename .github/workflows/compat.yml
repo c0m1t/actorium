@@ -50,3 +50,27 @@ jobs:
         env:
           XSTATE: ${{ matrix.xstate }}
           API: ${{ matrix.api }}
+
+  # A failed scheduled run notifies only whoever last edited the cron, so
+  # report it in one issue that later failures comment on.
+  report:
+    needs: matrix
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      TITLE: Scheduled compatibility check failed
+    steps:
+      - run: |
+          body="The scheduled compatibility check failed: $RUN_URL"
+          issue=$(gh issue list --state open --search "\"$TITLE\" in:title" \
+            --json number,title --jq "map(select(.title == env.TITLE))[0].number // empty")
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --body "$body"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi
