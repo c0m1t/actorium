@@ -80,9 +80,9 @@ processes the event when the actor starts.
 A target already known to be terminal finishes the command immediately as
 [`target_terminal`](../reference/outcomes.md#reasons): its snapshot is done or
 errored, for example after a failing initial `context`, or this runtime saw it
-stop before it started. An actor stopped before start keeps an active
-snapshot, so if this runtime doesn't observe it, the command ends `unobserved`
-while XState refuses the event.
+stop before it started. Stopping an actor before start leaves its snapshot
+unchanged. If that snapshot is still active and this runtime doesn't observe
+the actor, the command ends `unobserved` while XState refuses the event.
 
 XState runs initialization first. Startup actions, relays and Promise work do
 not belong to a queued command. Each queued command then owns only its own
