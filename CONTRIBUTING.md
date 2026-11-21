@@ -42,5 +42,6 @@ including builds made from tags.
 
 [release-please](https://github.com/googleapis/release-please) keeps a release PR open with the
 next version and `CHANGELOG.md`, built from `feat`, `fix`, `perf` and breaking-change titles.
-Merging it tags the release and publishes to npm from `release.yml` through trusted publishing.
+Merging it tags the release, publishes to npm from `release.yml` through trusted publishing and
+then deploys the docs, so docs changes go live with the next release.
 Nobody bumps versions or writes changelog entries by hand.
