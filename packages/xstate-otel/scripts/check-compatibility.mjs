@@ -24,7 +24,11 @@ const testSdk = '@opentelemetry/sdk-trace-base';
 
 /** The exact version the workspace catalog pins for `name`. */
 async function catalogVersion(name) {
-  const workspace = await readFile(join(root, 'pnpm-workspace.yaml'), 'utf8');
+  // Normalize line endings, as a Windows checkout may convert them to CRLF.
+  const workspace = (await readFile(join(root, 'pnpm-workspace.yaml'), 'utf8')).replaceAll(
+    '\r\n',
+    '\n',
+  );
   const catalog = /^catalog:\n((?:[ \t]+.*\n)+)/m.exec(workspace)?.[1] ?? '';
   const version = new RegExp(`^\\s+'?${name}'?:\\s*'?([^'\\s]+)`, 'm').exec(catalog)?.[1];
   if (!version) throw new Error(`No catalog version for ${name} in pnpm-workspace.yaml`);
