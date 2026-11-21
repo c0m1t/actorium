@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # trusted publishing and provenance
+      id-token: write # trusted publishing, which also adds provenance
     steps:
       # release-please finds merged release PRs on its own, so the release can
       # belong to another commit than the push that started this run.
@@ -91,7 +91,7 @@ jobs:
       # release commit is checked out detached, so skip the branch checks.
       - if: steps.version.outputs.publish == 'true'
         working-directory: packages/xstate-otel
-        run: pnpm publish --no-git-checks --provenance
+        run: pnpm publish --no-git-checks
 
   # After publishing, so the docs never describe a version npm does not have.
   docs:
