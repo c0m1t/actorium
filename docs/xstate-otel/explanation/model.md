@@ -103,8 +103,9 @@ one meaning:
 - A target that fails while handling the command makes it `failed`, while a
   child failure that the parent handled is `completed` with `hadError`. This
   keeps a crashed actor distinguishable from a recovered one. A target that
-  was already terminal before the send is `target_terminal` instead, because
-  the command caused nothing.
+  was already terminal when the send was attempted is `target_terminal`
+  instead. Like every outcome, it says nothing about effects outside the
+  actor, such as those of send wrappers or inspection observers.
 
 ## Keeping business data clean
 

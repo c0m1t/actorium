@@ -187,6 +187,7 @@ describe('registered terminal targets', () => {
     const send = vi.spyOn(target, 'send');
     const command = tracing.sendCommand(target, run, { name: 'prestart.error' });
     expect(send).toHaveBeenCalledExactlyOnceWith(run);
+    expect(send.mock.calls[0]?.[0]).toBe(run);
     send.mockRestore();
     await expect(command.finished).resolves.toEqual({
       outcome: 'target_terminal',
@@ -244,6 +245,29 @@ describe('registered terminal targets', () => {
     await tracing.settle();
     expect(result).toEqual({ outcome: 'target_terminal', hadError: false });
     expect(getSpan('init.named').attributes[reason]).toBe('stopped');
+    expectReleased(tracing, actor);
+  });
+
+  it('keeps native start bookkeeping for an init-named command before start', async () => {
+    const diagnostic = vi.fn();
+    const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+    using actor = createTestActor(failingContext, { inspect: tracing.inspect });
+    const command = tracing.sendCommand(actor, { type: 'xstate.init' }, { name: 'init.prestart' });
+    await expect(command.finished).resolves.toEqual({
+      outcome: 'target_terminal',
+      hadError: false,
+    });
+    expect(getSpan('init.prestart').attributes[reason]).toBe('error');
+    await tracing.settle();
+    // Only the real start reports the initialization error.
+    expect(diagnostic).not.toHaveBeenCalled();
+    actor.subscribe({ error: () => {} });
+    actor.start();
+    await tracing.settle();
+    expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
+      phase: 'unassociatedRootError',
+      error: actor.getSnapshot().error,
+    });
     expectReleased(tracing, actor);
   });
 

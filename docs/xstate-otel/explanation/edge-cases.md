@@ -37,4 +37,5 @@ These are deliberate boundaries. Each has a workaround.
 | Invoked machines have no span of their own            | Only their traced Promise work keeps the command open                                                         |
 | Advancing a clock inside an action without a policy   | The firing looks like a relay from that action; advance clocks between actor calls                            |
 | Process restarts end live operations                  | Start new commands; link to stored context when needed                                                        |
+| One event object in nested sends to one actor         | Outcomes or processing owners can swap; use a new event object per command                                    |
 | `finished` is not a business result                   | Read the snapshot or an application reply                                                                     |

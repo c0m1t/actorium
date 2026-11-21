@@ -183,19 +183,19 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
         if (!this.observedActors.has(inspection.actorRef)) {
           return;
         }
-        if (inspection.event.type === 'xstate.init') {
+        // An explicit command always owns its delivery, whatever its type.
+        // XState creates its own init event object, so it never matches one.
+        const command = this.shiftPendingCommand(inspection.event, inspection.actorRef);
+        const nativeInit = !command && inspection.event.type === 'xstate.init';
+        if (nativeInit) {
           this.startedActors.add(inspection.actorRef);
         }
         this.deferLifecycleCheck(inspection.actorRef as AnyActorRef);
-        // An explicit command always owns its delivery, whatever its type.
-        const command = this.shiftPendingCommand(inspection.event, inspection.actorRef);
         // Native initialization still runs for restored/initial error or done
-        // snapshots. It is not a send to an already terminal actor. Its event
-        // object is created by XState, so it never matches a command.
-        const terminalReason =
-          !command && inspection.event.type === 'xstate.init'
-            ? undefined
-            : this.terminalReason(inspection.actorRef as AnyActorRef);
+        // snapshots. It is not a send to an already terminal actor.
+        const terminalReason = nativeInit
+          ? undefined
+          : this.terminalReason(inspection.actorRef as AnyActorRef);
         if (terminalReason) {
           // XState emits this inspection before its own status check. A stopped
           // target refuses the event with a development warning. Otherwise it
