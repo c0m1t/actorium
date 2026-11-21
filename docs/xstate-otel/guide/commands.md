@@ -71,7 +71,8 @@ so no handle is returned.
 ## Commands before `start()`
 
 Commands sent before `actor.start()` wait in XState's mailbox; their spans
-include the waiting time. A target that is already terminal finishes the
+include the waiting time; a command stays open for as long as its actor is
+neither started nor stopped. A target that is already terminal finishes the
 command immediately as [`target_terminal`](../reference/outcomes.md#reasons):
 its snapshot is done or errored, for example after a failing initial
 `context`, or it was stopped before it started. XState runs initialization first. Startup actions,
