@@ -228,13 +228,13 @@ describe('showcase scenarios', () => {
 
   test('command to a closed order', async () => {
     const { result, traces } = await run('closed-order');
-    expect(result).toMatchObject({ cancel: { outcome: 'dropped', hadError: false } });
+    expect(result).toMatchObject({ cancel: { outcome: 'target_terminal', hadError: false } });
     expect(outline(traces)).toMatchInlineSnapshot(`
       "
       trace
         POST /api/scenarios/:id [server] http.request.method=POST http.route=/api/scenarios/:id url.path=/api/scenarios/closed-order http.response.status_code=200
       trace
-        order.cancel [internal] order.id=order-5 actorium.xstate.command.event=CANCEL actorium.xstate.operation.outcome=dropped
+        order.cancel [internal] order.id=order-5 actorium.xstate.command.event=CANCEL actorium.xstate.operation.outcome=target_terminal actorium.xstate.operation.outcome_reason=done
           → link POST /api/scenarios/:id
       trace
         order.place [internal] order.id=order-5 actorium.xstate.command.event=PLACE actorium.xstate.operation.outcome=completed

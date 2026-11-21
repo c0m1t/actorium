@@ -17,6 +17,7 @@ import type {
   OperationSummary,
   OperationTelemetry,
   TelemetryBackend,
+  TerminalReason,
   WorkStart,
   WorkTelemetry,
 } from '../core/telemetry.js';
@@ -224,12 +225,13 @@ class OperationSpan implements OperationTelemetry {
     });
   }
 
-  droppedDelivery(recipient: ActorRefLike, event: AnyEventObject): void {
+  recipientTerminal(recipient: ActorRefLike, event: AnyEventObject, reason: TerminalReason): void {
     const { keys } = this.backend;
     const actorIdAttribute = this.backend.actorIdAttribute();
-    this.span.addEvent(keys.deliveryDroppedEvent, {
+    this.span.addEvent(keys.recipientTerminalEvent, {
       ...(actorIdAttribute === false ? {} : { [actorIdAttribute]: actorId(recipient) }),
       [keys.eventType]: event.type,
+      [keys.eventTerminalReason]: reason,
     });
   }
 
@@ -237,17 +239,26 @@ class OperationSpan implements OperationTelemetry {
     return this.backend.recordFailure(this.span, error, isEnded);
   }
 
-  end({ outcome, hadError, errorCount, droppedDeliveries }: OperationSummary): void {
+  end({
+    outcome,
+    outcomeReason,
+    hadError,
+    errorCount,
+    terminalRecipientEvents,
+  }: OperationSummary): void {
     const { keys } = this.backend;
     this.span.setAttribute(keys.operationOutcome, outcome);
+    if (outcomeReason !== undefined) {
+      this.span.setAttribute(keys.operationOutcomeReason, outcomeReason);
+    }
     if (hadError) {
       this.span.setAttribute(keys.operationHadError, true);
     }
     if (errorCount > 0) {
       this.span.setAttribute(keys.operationErrorCount, errorCount);
     }
-    if (droppedDeliveries > 0) {
-      this.span.setAttribute(keys.operationDroppedDeliveryCount, droppedDeliveries);
+    if (terminalRecipientEvents > 0) {
+      this.span.setAttribute(keys.operationTerminalRecipientEventCount, terminalRecipientEvents);
     }
     this.span.end();
   }

@@ -8,18 +8,22 @@ const names = {
   commandEvent: 'command.event',
   /** Operation span: numeric operation id, unique per XStateTracing instance. */
   operationId: 'operation.id',
-  /** Operation span: `completed`, `cancelled`, `dropped` or `failed`. */
+  /** Operation span: `completed`, `cancelled`, `failed`, `target_terminal` or `unobserved`. */
   operationOutcome: 'operation.outcome',
+  /** Operation span: why a command ended `target_terminal` or `unobserved`. */
+  operationOutcomeReason: 'operation.outcome_reason',
   /** Operation span: present and true when any traced work failed. */
   operationHadError: 'operation.had_error',
   /** Operation span: number of failed work/operation records. */
   operationErrorCount: 'operation.error_count',
-  /** Operation span: relays refused by stopped recipients. */
-  operationDroppedDeliveryCount: 'operation.dropped_delivery_count',
+  /** Operation span: relays sent to recipients already terminal. */
+  operationTerminalRecipientEventCount: 'operation.terminal_recipient_event_count',
   /** Work spans and span events: id of the actor involved. */
   actorId: 'actor.id',
   /** Span events: type of the event involved. */
   eventType: 'event.type',
+  /** Recipient-terminal span events: `done`, `error` or `stopped`. */
+  eventTerminalReason: 'event.terminal_reason',
   /** Microstep events: serialized state value. */
   stateValue: 'state.value',
   /** Work span: `cancelled` when the work was aborted or stopped. */
@@ -34,8 +38,8 @@ const names = {
   scheduledOriginOperationId: 'scheduled.origin_operation_id',
   /** Operation span event: one per microstep when `recordMicrosteps` is set. */
   microstepEvent: 'microstep',
-  /** Operation span event: a relay refused by a stopped recipient. */
-  deliveryDroppedEvent: 'delivery.dropped',
+  /** Operation span event: a relay sent to a recipient already terminal. */
+  recipientTerminalEvent: 'event.recipient_terminal',
   /** Span name: default for operations started by delayed work. */
   scheduledSpan: 'scheduled',
 } as const;

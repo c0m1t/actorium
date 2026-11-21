@@ -6,7 +6,12 @@ import {
   type TelemetryDiagnostic,
   type XStateTracingOptions,
 } from '../src/index.js';
-import { createTestActor, internals, useTestTracer } from './helpers.js';
+import {
+  createTestActor,
+  expectStoppedActorWarnings,
+  internals,
+  useTestTracer,
+} from './helpers.js';
 
 // Focused coverage for the two places that rely on XState behaviour outside its
 // documented API: the private `_parent` lookup and the public `stop` wrapper.
@@ -97,8 +102,10 @@ describe('public stop delegation', () => {
     expect(actor.stop()).toBe(actor);
     await expect(pending.finished).resolves.toEqual({ outcome: 'cancelled', hadError: false });
     await expect(
-      tracing.sendCommand(actor, { type: 'RUN' }, { name: 'stop.after' }).finished,
-    ).resolves.toEqual({ outcome: 'dropped', hadError: false });
+      expectStoppedActorWarnings(actor, ['RUN'], () =>
+        tracing.sendCommand(actor, { type: 'RUN' }, { name: 'stop.after' }),
+      ).finished,
+    ).resolves.toEqual({ outcome: 'target_terminal', hadError: false });
   });
 });
 

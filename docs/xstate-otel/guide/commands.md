@@ -58,8 +58,8 @@ later message or a subscription event. Give those their own command, or use
 | `spanId`      | Span ID of the operation span                               |
 | `finished`    | Resolves with `{ outcome, hadError }` when the work settled |
 
-`finished` never rejects. Its `outcome` is `completed`, `cancelled`, `dropped`
-or `failed`; [outcomes](../reference/outcomes.md) defines each one. An
+`finished` never rejects. [Outcomes](../reference/outcomes.md) defines each
+`outcome` it can resolve with. An
 operation can complete while the business failed, for example when an
 `onError` transition leads to a failure state. Read the snapshot, as in the
 example above, or use an application reply for the business result.
@@ -71,7 +71,10 @@ so no handle is returned.
 ## Commands before `start()`
 
 Commands sent before `actor.start()` wait in XState's mailbox; their spans
-include the waiting time. XState runs initialization first. Startup actions,
+include the waiting time. A target that is already terminal finishes the
+command immediately as [`target_terminal`](../reference/outcomes.md#reasons):
+its snapshot is done or errored, for example after a failing initial
+`context`, or it was stopped before it started. XState runs initialization first. Startup actions,
 relays and Promise work do not belong to a queued command. Each queued command
 then owns only its own delivery when it runs.
 

@@ -64,9 +64,12 @@ it('emits every name under the configured namespace, and only names from the tab
   await tracing.settle();
   expect(spanNames()).toContain(`${namespace}.scheduled`);
   await expectStoppedActorWarnings(child, ['WORK'], () => send('DROP', 'drop')).finished;
+  await expectStoppedActorWarnings(child, ['PING'], () =>
+    tracing.sendCommand(child, { type: 'PING' }, { name: 'terminal' }),
+  ).finished;
   actor.stop();
 
-  const applicationNames = new Set(['run', 'fail', 'wait', 'cancel', 'later', 'drop']);
+  const applicationNames = new Set(['run', 'fail', 'wait', 'cancel', 'later', 'drop', 'terminal']);
   applicationNames.add('work.ok').add('work.failing').add('work.pending').add('app.request');
   const emitted = new Set<string>();
   for (const span of spans()) {
