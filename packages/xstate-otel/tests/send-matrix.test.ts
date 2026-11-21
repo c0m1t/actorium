@@ -26,6 +26,9 @@ const reason = 'actorium.xstate.operation.outcome_reason';
 const terminalRecipientCount = 'actorium.xstate.operation.terminal_recipient_event_count';
 const recipientTerminal = 'actorium.xstate.event.recipient_terminal';
 const terminalReason = 'actorium.xstate.event.terminal_reason';
+const microstep = 'actorium.xstate.microstep';
+const actorIdKey = 'actorium.xstate.actor.id';
+const eventTypeKey = 'actorium.xstate.event.type';
 
 const targetStates = [
   'not started, active',
@@ -90,7 +93,8 @@ interface Target {
 function createTarget(state: TargetState, inspect?: Inspect): Target {
   const processed: string[] = [];
   const hooks = { kick: () => {} };
-  const options = inspect ? { inspect } : {};
+  // Root targets share the child's ID, so span events can name the target.
+  const options = inspect ? { id: 'target', inspect } : { id: 'target' };
   const ignoreErrors = (actor: AnyActorRef) => actor.subscribe({ error: () => {} });
   let notStarted = false;
   let processedWhileBusy: boolean | undefined;
@@ -211,7 +215,7 @@ function relaySender(target: AnyActorRef, relay: 'sendTo' | 'forwardTo', inspect
     relay === 'sendTo' ? sendTo(() => target, { type: 'PING' }) : forwardTo(() => target);
   return createActor(
     setup({}).createMachine({ on: { PING: { actions: action } } }),
-    inspect ? { inspect } : {},
+    inspect ? { id: 'sender', inspect } : { id: 'sender' },
   ).start();
 }
 
@@ -481,7 +485,10 @@ describe('xstate-otel', () => {
     ['forwardTo', 'not inspected', false],
   ] as const)('records a %s relay to a target %s', async (relay, _, inspected) => {
     const rows = await forEachStateAsync(async (state) => {
-      const tracing = new XStateTracing(tracer, { onTelemetryError: () => {} });
+      const tracing = new XStateTracing(tracer, {
+        onTelemetryError: () => {},
+        recordMicrosteps: true,
+      });
       const target = createTarget(state, inspected ? tracing.inspect : undefined);
       const sender = relaySender(target.actor, relay, tracing.inspect);
       const name = `${relay} ${state} ${inspected}`;
@@ -502,6 +509,13 @@ describe('xstate-otel', () => {
             .filter((event) => event.name === recipientTerminal)
             .map((event) => event.attributes?.[terminalReason]),
           processed: target.processed.length > 0,
+          // The recipient's turn joined the relay's operation.
+          recipientMicrosteps: span?.events.filter(
+            (event) =>
+              event.name === microstep &&
+              event.attributes?.[actorIdKey] === 'target' &&
+              event.attributes[eventTypeKey] === 'PING',
+          ).length,
           ...(beforeStart === result() ? {} : { beforeStart }),
         };
         return row;
@@ -510,17 +524,24 @@ describe('xstate-otel', () => {
       target.stop();
       return row;
     });
-    const counted = { outcome: 'completed', terminalReasons: [], processed: true };
+    const counted = {
+      outcome: 'completed',
+      terminalReasons: [],
+      processed: true,
+      recipientMicrosteps: 1,
+    };
     const terminal = (terminalReason: string) => ({
       outcome: 'completed',
       terminalRecipients: 1,
       terminalReasons: [terminalReason],
       processed: false,
+      recipientMicrosteps: 0,
     });
     const ignored = (processed: boolean) => ({
       outcome: 'completed',
       terminalReasons: [],
       processed,
+      recipientMicrosteps: 0,
     });
     expect(rows).toEqual(
       inspected
@@ -555,7 +576,7 @@ describe('xstate-otel', () => {
     );
   });
 
-  it('records plain sends, completion notifications and timers', async () => {
+  it('records plain sends, stops before start, completion notifications and timers', async () => {
     const rows: Record<string, unknown> = {};
 
     for (const state of ['running, idle', 'done after start'] as const) {
@@ -568,6 +589,26 @@ describe('xstate-otel', () => {
       });
       rows[`plain send, ${state}`] = { operations: spans().length - before };
       target.stop();
+    }
+
+    for (const via of ['sendCommand', 'sendTo'] as const) {
+      const tracing = new XStateTracing(tracer, { onTelemetryError: () => {} });
+      const target = createTarget('not started, active', tracing.inspect);
+      const sender = relaySender(target.actor, 'sendTo', tracing.inspect);
+      const command = tracing.sendCommand(
+        via === 'sendTo' ? sender : target.actor,
+        { type: 'PING' },
+        { name: `${via} before stop` },
+      );
+      const result = track(command);
+      await tracing.settle();
+      const beforeStop = result();
+      target.stop();
+      rows[`${via} to an observed actor stopped before it starts`] = {
+        beforeStop,
+        outcome: (await command.finished).outcome,
+      };
+      sender.stop();
     }
 
     for (const parentStopped of [false, true]) {
@@ -633,6 +674,14 @@ describe('xstate-otel', () => {
     expect(rows).toEqual({
       'plain send, running, idle': { operations: 0 },
       'plain send, done after start': { operations: 0 },
+      'sendCommand to an observed actor stopped before it starts': {
+        beforeStop: 'open',
+        outcome: 'cancelled',
+      },
+      'sendTo to an observed actor stopped before it starts': {
+        beforeStop: 'open',
+        outcome: 'cancelled',
+      },
       'completion notification, parent running': { whileWorking: 'open', outcome: 'completed' },
       'completion notification, parent stopped first': {
         whileWorking: 'open',

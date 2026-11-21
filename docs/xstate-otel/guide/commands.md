@@ -70,10 +70,12 @@ so no handle is returned.
 
 ## Commands before `start()`
 
-Commands sent before `actor.start()` wait in XState's mailbox; their spans
-include the waiting time; a command stays open for as long as its actor is
-neither started nor stopped. A target that is already terminal finishes the
-command immediately as [`target_terminal`](../reference/outcomes.md#reasons):
+Commands sent before `actor.start()` wait in XState's mailbox. For an actor
+this runtime observes, the command stays open until the actor starts and
+processes it, and its span includes the waiting time. For an actor it doesn't
+observe, the command ends [`unobserved`](../reference/outcomes.md#reasons) at
+once, although XState still queues the event. A target that is already
+terminal finishes the command immediately as [`target_terminal`](../reference/outcomes.md#reasons):
 its snapshot is done or errored, for example after a failing initial
 `context`, or it was stopped before it started. XState runs initialization first. Startup actions,
 relays and Promise work do not belong to a queued command. Each queued command
