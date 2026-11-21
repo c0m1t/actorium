@@ -115,9 +115,9 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
   }
 
   /**
-   * Waits for currently queued or running bookkeeping groups and their follow-ups.
-   * Does not wait for business work or empty mailboxes, stop actors, force span
-   * completion or export.
+   * Waits for currently queued or running bookkeeping groups and their synchronous
+   * follow-ups. Does not wait for business work or empty mailboxes, stop actors,
+   * force span completion or export.
    */
   waitForBookkeeping(): Promise<void> {
     const groups = [...this.bookkeeping];
@@ -157,7 +157,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
       case '@xstate.actor': {
         this.observeActor(inspection.actorRef as AnyActorRef);
         // Invoked machine actors run their initial input mappers before their
-        // xstate.init delivery is inspected. Capture the creating parent's
+        // xstate.init event is inspected. Capture the creating parent's
         // current operation so nested actors can join it during initialization.
         const parent = this.resolveParentActor(inspection.actorRef);
         if (!parent) this.rootActors.add(inspection.actorRef);
@@ -184,7 +184,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
         if (!this.observedActors.has(inspection.actorRef)) {
           return;
         }
-        // An explicit command always owns its delivery, whatever its type.
+        // An explicit command always owns its event, whatever its type.
         // XState creates its own init event object, so it never matches one.
         const command = this.shiftPendingCommand(inspection.event, inspection.actorRef);
         const nativeInit = !command && inspection.event.type === 'xstate.init';
@@ -648,9 +648,9 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     }
 
     // Raised/internal events produce microsteps inside the current macrostep
-    // without producing their own @xstate.event delivery. Attribute those to
+    // without producing their own @xstate.event inspection. Attribute those to
     // the macrostep. xstate.init is the exception: for a pre-start queued event,
-    // its initial microstep can occur before the init delivery is inspected.
+    // its initial microstep can occur before the init event is inspected.
     if (event.type === 'xstate.init') {
       return undefined;
     }
@@ -680,8 +680,9 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
   private deferLifecycleCheck(actor: AnyActorRef): void {
     if (this.lifecycleChecks.has(actor) || this.terminalActors.has(actor)) return;
     this.lifecycleChecks.add(actor);
-    // Error paths can omit snapshot inspection. One public snapshot check per
-    // actor and macrostep observes them without subscribing to (and consuming) errors.
+    // Error paths can omit snapshot inspection. One pending public snapshot
+    // check per actor, shared by every send inspected before it runs, observes
+    // them without subscribing to (and consuming) errors.
     this.scheduleBookkeeping(() => {
       this.lifecycleChecks.delete(actor);
       this.reconcileActorLifecycle(actor);

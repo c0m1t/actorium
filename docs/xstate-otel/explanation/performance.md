@@ -24,14 +24,15 @@ operation open until the actor stops it.
 
 ## Cost per event
 
-Every inspected event, traced or not, gets a small record so ownership stays
-exact. Normal mailbox operations take constant time: appending, processing
+Every inspected send to a live, observed actor, traced or not, gets a small
+record so ownership stays exact. Normal mailbox operations take constant time: appending, processing
 `xstate.init` ahead of queued commands and taking the next entry. Two
 exceptional paths scan the pending queue once: matching an out-of-order
 snapshot and rolling back a rejected command.
 
-Each inspected event schedules at most one lifecycle check per actor per
-macrostep, tracked weakly. No actor subscriptions are installed.
+Lifecycle checks are coalesced per actor, as
+[errors without subscriptions](inspection-and-ordering.md#errors-without-subscriptions)
+describes. No actor subscriptions are installed.
 
 With a timer policy set, registration normally takes the first matching
 recorded action, and cancellation finds its record by timeout handle, so

@@ -37,14 +37,14 @@ sequenceDiagram
   K->>T: Wrapped callback fires
   T->>T: Remove the record, mark this firing
   T->>X: Original callback relays the event
-  X->>T: Delivery inspected: start a linked operation or none
+  X->>T: Send inspected: start a linked operation or none
   X->>R: Event enters the recipient's mailbox
 ```
 
 The delayed action is matched to its registration by source, exact event
 object, recipient, delay and ID. Each registration gets its own callback, so a
 reused event object cannot merge two timers, and the event is never cloned or
-tagged. The firing marker is consumed when the delivery is inspected, before
+tagged. The firing marker is consumed when the send is inspected, before
 the recipient runs, so follow-up relays use ordinary ownership.
 
 A timer record keeps only the origin's span context, its operation ID and the

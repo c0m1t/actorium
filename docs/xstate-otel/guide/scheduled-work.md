@@ -1,7 +1,8 @@
 # Timers
 
-XState timers (`after`, delayed `raise` and delayed `sendTo`) fire after the
-command that scheduled them has ended. Without configuration they are not
+XState timers (`after`, delayed `raise` and delayed `sendTo`) fire
+independently of the operation that scheduled them, which may have ended or
+may still be open. Without configuration they are not
 traced. Setting `timerPolicy` installs a scheduler integration that
 can start a new operation, linked to the origin, when a timer fires.
 

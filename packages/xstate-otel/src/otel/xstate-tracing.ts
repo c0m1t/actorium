@@ -43,9 +43,9 @@ export class XStateTracing {
   }
 
   /**
-   * Waits for currently queued or running bookkeeping groups and their follow-ups.
-   * Does not wait for business work or empty mailboxes, stop actors, force span
-   * completion or export.
+   * Waits for currently queued or running bookkeeping groups and their synchronous
+   * follow-ups. Does not wait for business work or empty mailboxes, stop actors,
+   * force span completion or export.
    */
   waitForBookkeeping(): Promise<void> {
     return this.runtime.waitForBookkeeping();

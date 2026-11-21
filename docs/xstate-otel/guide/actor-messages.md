@@ -57,7 +57,7 @@ Their lifetimes are not spans. A message a callback actor sends back from a
 later callback has no operation, and neither does work it starts. Adapt each
 meaningful message into a command, as in
 [subscriptions and callback actors](../recipes/http-boundaries.md#subscriptions-and-callback-actors).
-Events sent with `emit` are not relays either.
+`emit` doesn't join either; see [relay](../reference/glossary.md#library-terms).
 
 ## Actions
 

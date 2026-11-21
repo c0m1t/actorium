@@ -20,7 +20,7 @@ operation:
 1. A work span starts as a child of the operation span.
 2. The implementation runs with the work span's context active, so
    instrumented clients create child spans.
-3. The work span ends when the Promise settles. The operation stays open until
+3. The work span ends when the Promise settles. The operation stays open
    through the [completion handoff](../reference/glossary.md#library-terms),
    and the parent's handling of `onDone` or `onError` is counted too, so
    replacement work started there joins the same operation.

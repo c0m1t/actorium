@@ -12,8 +12,8 @@ returns an `OperationTrace`.
 started by a command or by a timer under a linked
 [timer policy](../guide/scheduled-work.md). It groups counted event processing
 and the traced Promise actors created during it, and ends when neither
-remains. Timers don't keep the operation that scheduled them open, and a
-cancelled timer creates no operation.
+remains. [Timers](../guide/scheduled-work.md) has the rules for timers and
+the operations they start.
 
 **Delivery.** XState putting an event into an actor's mailbox. Delivery,
 waiting in the mailbox and processing are separate boundaries: inspection
@@ -58,7 +58,7 @@ operation that scheduled the timer.
 **Target actor.** The actor a command, or a timer operation, was sent to.
 Its failure makes the operation `failed`.
 
-**Root actor.** An actor with no creating parent: the actor passed to
+**Root actor.** An actor with no creating parent, such as one returned by
 `createActor`.
 
 **Telemetry namespace.** The prefix of every name the library emits,

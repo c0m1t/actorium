@@ -107,7 +107,7 @@ export class TimerIntegration {
 
   /**
    * Returns the timer record when `event` is being delivered by a traced clock
-   * callback, and `undefined` for every other delivery.
+   * callback, and `undefined` for every other send.
    */
   claimDispatch(
     source: unknown,
@@ -213,12 +213,12 @@ export class TimerIntegration {
   }
 
   cancel(actor: AnyActorRef): void {
-    const timer = this.timersByActor.get(actor);
-    if (!timer) {
+    const registrations = this.timersByActor.get(actor);
+    if (!registrations) {
       return;
     }
-    for (const delivery of timer) {
-      this.remove(delivery);
+    for (const registration of registrations) {
+      this.remove(registration);
     }
   }
 

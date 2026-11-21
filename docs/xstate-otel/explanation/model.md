@@ -25,9 +25,12 @@ sequenceDiagram
   Work-->>Trace: Creation inspected: capture the owning operation
   Parent->>Work: Start the Promise
   Trace->>Trace: shouldTrace, work span, work registration
-  Work-->>Parent: Done or error event
-  Parent-->>Trace: Handler ran; replacement work may join
-  Trace->>Trace: Release work registration, recheck in a microtask
+  Work-->>Parent: Done or error notification
+  Parent-->>Trace: Notification inspected and counted
+  Trace->>Trace: Release work registration
+  Note over Parent,Trace: The parent's handler runs before or after the release
+  Parent-->>Trace: Handler processed; replacement work may join
+  Trace->>Trace: Recheck in a microtask
   Trace-->>Caller: finished resolves
 ```
 
@@ -80,17 +83,12 @@ ended operation.
 
 ## 4. End in the right order
 
-The work span ends as soon as the Promise settles. The work registration,
-however, is released only when the runtime reconciles the Promise actor as
-terminal, which XState reports after relaying its done or error notification
-to the parent, the
-[completion handoff](../reference/glossary.md#library-terms). The parent's
-queued handling of that notification is counted separately, so a replacement
-Promise started by `onDone` or `onError` joins before the operation can end.
+The work span ends as soon as the Promise settles. The work registration
+lasts through the [completion handoff](../reference/glossary.md#library-terms), so a replacement Promise started
+by `onDone` or `onError` joins before the operation can end.
 
 When the pending event count and the work registrations both reach zero, the
-runtime checks
-again in a microtask before ending the operation. This gives a busy parent's
+runtime checks again in a microtask before ending the operation. This gives a busy parent's
 queued completion event or a synchronous handoff the chance to register new
 work, without depending on state names. It does not wait for timers or
 anything asynchronous.
