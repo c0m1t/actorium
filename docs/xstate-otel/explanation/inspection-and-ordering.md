@@ -72,7 +72,7 @@ sequenceDiagram
   C->>P: Relay xstate.done.actor event
   P->>T: Relay inspected: counted for the registration's operation
   C->>T: Terminal snapshot: release old work registration
-  Note over P,T: An idle parent runs onDone during the relay, before the release; a busy parent runs it later
+  Note over P,T: An idle parent runs onDone during the relay, before the release, a busy parent runs it later
   P->>P: onDone may start replacement work
   P->>T: Replacement captured and registered
   Note over T: Microtask end check sees the counted relay or the replacement

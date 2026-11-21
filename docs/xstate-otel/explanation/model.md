@@ -29,7 +29,7 @@ sequenceDiagram
   Parent-->>Trace: Notification inspected and counted
   Trace->>Trace: Release work registration
   Note over Parent,Trace: The parent's handler runs before or after the release
-  Parent-->>Trace: Handler processed; replacement work may join
+  Parent-->>Trace: Handler processed, replacement work may join
   Trace->>Trace: Recheck in a microtask
   Trace-->>Caller: finished resolves
 ```
@@ -95,21 +95,11 @@ anything asynchronous.
 
 ## Why outcomes mean what they mean
 
-Callers act on `finished`, so each [outcome](../reference/outcomes.md) has
-one meaning:
-
-- `cancelled` is reserved for work the command had started. A relay to an
-  already terminal actor is not such work: the command's own work completed,
-  and a caller that retried on `cancelled` would repeat a command that took
-  effect. It is
-  [recorded on the span](../reference/outcomes.md#relays-to-terminal-actors)
-  instead.
-- A target that fails while handling the command makes it `failed`, while a
-  child failure that the parent handled is `completed` with `hadError`. This
-  keeps a crashed actor distinguishable from a recovered one. A target that
-  was already terminal when the send was attempted is `target_terminal`
-  instead. Like every outcome, it says nothing about effects outside the
-  actor, such as those of send wrappers or inspection observers.
+A relay to an already terminal actor can happen after the command has taken
+effect. Marking the operation `cancelled` for that relay could prompt a caller
+to repeat the command. Distinguishing a target failure from a handled child
+error lets callers tell whether the target itself failed. See
+[Outcomes](../reference/outcomes.md) for how each case is recorded.
 
 ## Keeping business data clean
 
