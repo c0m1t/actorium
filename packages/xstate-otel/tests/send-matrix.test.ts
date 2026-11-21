@@ -611,6 +611,44 @@ describe('xstate-otel', () => {
       sender.stop();
     }
 
+    {
+      // The stop abandons only that delivery; the operation still waits for
+      // its other work, whose failure decides the outcome.
+      const tracing = new XStateTracing(tracer, { onTelemetryError: () => {} });
+      const target = createTarget('not started, active', tracing.inspect);
+      const work = deferred<string>();
+      const sender = createActor(
+        setup({
+          actors: { work: tracing.fromPromise<string, object>('work', () => work.promise) },
+        }).createMachine({
+          initial: 'idle',
+          states: {
+            idle: {
+              on: {
+                PING: { target: 'working', actions: sendTo(() => target.actor, { type: 'PING' }) },
+              },
+            },
+            working: { invoke: { src: 'work', input: {} } },
+          },
+        }),
+        { id: 'sender', inspect: tracing.inspect },
+      );
+      sender.subscribe({ error: () => {} });
+      sender.start();
+      const command = tracing.sendCommand(sender, { type: 'PING' }, { name: 'relay and work' });
+      const result = track(command);
+      await tracing.settle();
+      target.stop();
+      await tracing.settle();
+      const afterStop = result();
+      work.reject(new Error('work failed'));
+      rows['sendTo to an observed actor stopped before it starts, then the sender fails'] = {
+        afterStop,
+        outcome: (await command.finished).outcome,
+      };
+      sender.stop();
+    }
+
     for (const parentStopped of [false, true]) {
       const tracing = new XStateTracing(tracer, { onTelemetryError: () => {} });
       const work = deferred<string>();
@@ -681,6 +719,10 @@ describe('xstate-otel', () => {
       'sendTo to an observed actor stopped before it starts': {
         beforeStop: 'open',
         outcome: 'cancelled',
+      },
+      'sendTo to an observed actor stopped before it starts, then the sender fails': {
+        afterStop: 'open',
+        outcome: 'failed',
       },
       'completion notification, parent running': { whileWorking: 'open', outcome: 'completed' },
       'completion notification, parent stopped first': {

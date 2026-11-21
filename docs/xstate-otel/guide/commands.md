@@ -70,16 +70,23 @@ so no handle is returned.
 
 ## Commands before `start()`
 
-Commands sent before `actor.start()` wait in XState's mailbox. For an actor
-this runtime observes, the command stays open until the actor starts and
-processes it, and its span includes the waiting time. For an actor it doesn't
-observe, the command ends [`unobserved`](../reference/outcomes.md#reasons) at
-once, although XState still queues the event. A target that is already
-terminal finishes the command immediately as [`target_terminal`](../reference/outcomes.md#reasons):
-its snapshot is done or errored, for example after a failing initial
-`context`, or it was stopped before it started. XState runs initialization first. Startup actions,
-relays and Promise work do not belong to a queued command. Each queued command
-then owns only its own delivery when it runs.
+Commands sent before `actor.start()` to an actor whose snapshot is active wait
+in XState's mailbox. If this runtime observes the actor, the command stays open
+until the actor starts and processes it, and its span includes the waiting
+time. Otherwise the command ends
+[`unobserved`](../reference/outcomes.md#reasons) at once, although XState still
+processes the event when the actor starts.
+
+A target already known to be terminal finishes the command immediately as
+[`target_terminal`](../reference/outcomes.md#reasons): its snapshot is done or
+errored, for example after a failing initial `context`, or this runtime saw it
+stop before it started. An actor stopped before start keeps an active
+snapshot, so if this runtime doesn't observe it, the command ends `unobserved`
+while XState refuses the event.
+
+XState runs initialization first. Startup actions, relays and Promise work do
+not belong to a queued command. Each queued command then owns only its own
+delivery when it runs.
 
 If startup fails, or the actor is stopped before it starts, queued commands
 finish `cancelled` without inheriting the startup error. To trace startup work,
