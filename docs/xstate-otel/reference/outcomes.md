@@ -16,9 +16,10 @@ safe.
 
 `outcome` is recorded on the operation span as `operation.outcome`. The
 command is always passed to `actor.send`, so the target keeps XState's native
-behaviour: a started terminal actor refuses the event with its development
-warning, and an actor not yet started whose snapshot is already done or
-errored accepts it into the mailbox and discards it on `start()`.
+behaviour. In XState 5.33, a stopped actor refuses the event with its
+development warning. Otherwise a terminal target accepts it into the mailbox
+and discards it unprocessed: on `start()` for an actor not yet started, or
+when the actor stops after notifying its done-snapshot observers.
 
 Precedence: a send that throws gives `failed`. Otherwise `target_terminal`
 beats `unobserved`. Both can only come from `sendCommand`; a
@@ -46,12 +47,13 @@ snapshot is evidence: a stopped actor whose snapshot still says `active` ends
 
 ## Relays to terminal actors
 
-A relay sent to an actor that is already terminal is not abandoned work. The
-operation keeps its outcome and `hadError`, and records an
+A relay sent to an actor that is already terminal, and observed by this
+runtime, is not abandoned work. The operation keeps its outcome and
+`hadError`, and records an
 `event.recipient_terminal` span event (recipient ID, event type and
 `event.terminal_reason`, never the payload) and
 `operation.terminal_recipient_event_count`. A relay that no live operation
-owns records nothing.
+owns, or whose recipient this runtime doesn't observe, records nothing.
 
 ## `hadError` and span status
 

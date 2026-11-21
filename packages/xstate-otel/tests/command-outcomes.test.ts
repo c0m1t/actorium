@@ -181,8 +181,13 @@ describe('registered terminal targets', () => {
     });
     using source = createTestActor(relay, { inspect: tracing.inspect }).start();
 
-    // Not started: XState enqueues without a warning and start() discards it.
-    const command = tracing.sendCommand(target, { type: 'RUN' }, { name: 'prestart.error' });
+    // Not started: XState's _send either warns and refuses or enqueues. No
+    // warning (the console guard fails on one) means the event was enqueued.
+    const run = { type: 'RUN' };
+    const send = vi.spyOn(target, 'send');
+    const command = tracing.sendCommand(target, run, { name: 'prestart.error' });
+    expect(send).toHaveBeenCalledExactlyOnceWith(run);
+    send.mockRestore();
     await expect(command.finished).resolves.toEqual({
       outcome: 'target_terminal',
       hadError: false,
@@ -211,7 +216,54 @@ describe('registered terminal targets', () => {
     target.send({ type: 'PLAIN' });
     await tracing.settle();
     expect(spans()).toHaveLength(recorded);
+
+    // start() discards the queued events without processing them.
+    const processed: unknown[] = [];
+    target.system.inspect((inspection) => {
+      if (inspection.type === '@xstate.snapshot') processed.push(inspection.event.type);
+    });
+    target.subscribe({ error: () => {} });
+    target.start();
+    // An errored start emits no snapshot inspection at all.
+    expect(processed).toEqual([]);
+    expect(target.getSnapshot().status).toBe('error');
+    await tracing.settle();
     expectReleased(tracing, target, source);
+  });
+
+  it('classifies a command named xstate.init to a terminal target', async () => {
+    const tracing = new XStateTracing(tracer);
+    using actor = createTestActor(counter, { inspect: tracing.inspect }).start();
+    actor.stop();
+    await tracing.settle();
+    const command = expectStoppedActorWarnings(actor, ['xstate.init'], () =>
+      tracing.sendCommand(actor, { type: 'xstate.init' }, { name: 'init.named' }),
+    );
+    let result: unknown;
+    void command.finished.then((value) => (result = value));
+    await tracing.settle();
+    expect(result).toEqual({ outcome: 'target_terminal', hadError: false });
+    expect(getSpan('init.named').attributes[reason]).toBe('stopped');
+    expectReleased(tracing, actor);
+  });
+
+  it('ends target_terminal for a command sent from a done snapshot observer', async () => {
+    // XState notifies done observers before stopping the actor, so this send
+    // is queued without a warning and then discarded.
+    const tracing = new XStateTracing(tracer);
+    using actor = createTestActor(finishing, { inspect: tracing.inspect }).start();
+    let late: ReturnType<typeof tracing.sendCommand> | undefined;
+    actor.subscribe((snapshot) => {
+      if (snapshot.status === 'done') {
+        late = tracing.sendCommand(actor, { type: 'RUN' }, { name: 'from.done.observer' });
+      }
+    });
+    await expect(
+      tracing.sendCommand(actor, { type: 'FINISH' }, { name: 'finish' }).finished,
+    ).resolves.toEqual({ outcome: 'completed', hadError: false });
+    await expect(late?.finished).resolves.toEqual({ outcome: 'target_terminal', hadError: false });
+    expect(getSpan('from.done.observer').attributes[reason]).toBe('done');
+    expectReleased(tracing, actor);
   });
 
   it('reclassifies a command whose send wrapper stops the target first', async () => {
@@ -298,6 +350,10 @@ describe('a throwing inspection observer', () => {
     });
     stopped.stop();
     using outer = createTestActor(counter, { inspect: tracing.inspect }).start();
+    const runtime = (
+      tracing as unknown as { runtime: { startOperation(...args: unknown[]): unknown } }
+    ).runtime;
+    const started = vi.spyOn(runtime, 'startOperation');
     const run = { type: 'RUN' };
     let rethrown: unknown;
     wrapSend(outer, () => {
@@ -314,6 +370,9 @@ describe('a throwing inspection observer', () => {
     const unrelated = tracing.sendCommand(outer, run, { name: 'unrelated' });
 
     expect(rethrown).toBe(failure);
+    // The second operation started is the throwing command, inside the outer send.
+    expect(started.mock.results[1]?.value).toMatchObject({ pendingDeliveries: 0, ended: true });
+    started.mockRestore();
     const span = getSpan('throwing.inspector');
     expect(span.attributes[outcome]).toBe('failed');
     expect(span.attributes[reason]).toBeUndefined();

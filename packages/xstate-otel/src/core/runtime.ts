@@ -187,18 +187,20 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
           this.startedActors.add(inspection.actorRef);
         }
         this.deferLifecycleCheck(inspection.actorRef as AnyActorRef);
+        // An explicit command always owns its delivery, whatever its type.
+        const command = this.shiftPendingCommand(inspection.event, inspection.actorRef);
         // Native initialization still runs for restored/initial error or done
-        // snapshots. It is not a send to an already terminal actor.
+        // snapshots. It is not a send to an already terminal actor. Its event
+        // object is created by XState, so it never matches a command.
         const terminalReason =
-          inspection.event.type === 'xstate.init'
+          !command && inspection.event.type === 'xstate.init'
             ? undefined
             : this.terminalReason(inspection.actorRef as AnyActorRef);
         if (terminalReason) {
-          // XState emits this inspection before its own status check. A started
-          // target refuses the event; a not-yet-started one with an errored or
-          // done snapshot enqueues it and start() discards it. Neither is
-          // processing this runtime counts.
-          const command = this.shiftPendingCommand(inspection.event, inspection.actorRef);
+          // XState emits this inspection before its own status check. A stopped
+          // target refuses the event with a development warning. Otherwise it
+          // is enqueued and discarded unprocessed: by start() for a target not
+          // yet started, or by the stop that follows done-snapshot observers.
           if (command) {
             command.state = { status: 'terminal', reason: terminalReason };
             return;
@@ -215,9 +217,8 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
           }
           return;
         }
-        // An explicit command always owns its delivery. Only a clock callback
-        // registered by the public scheduler can claim a scheduling record.
-        const command = this.shiftPendingCommand(inspection.event, inspection.actorRef);
+        // Only a clock callback registered by the public scheduler can claim a
+        // scheduling record.
         if (command) {
           command.state = { status: 'counted' };
         }
