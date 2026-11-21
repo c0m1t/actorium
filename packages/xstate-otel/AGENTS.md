@@ -13,7 +13,8 @@ OpenTelemetry code and `src/xstate/` the only private XState access. `scripts/` 
 
 ## XState semantics
 
-- Record the exact XState version behind any claim about its behaviour.
+- Record the exact XState version behind a claim about its behaviour that no test checks. Tests
+  need no version: the compatibility matrix runs them on every tested version.
 - Reproduce disputed behaviour in a focused executable test before relying on it.
 - Keep `SimulatedClock` advancement separate from real timers, Promise microtasks and I/O.
 - Never send synthetic `xstate.done.actor.*` events to emulate invoked work completing.

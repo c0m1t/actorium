@@ -17,7 +17,7 @@ import {
   useTestTracer,
 } from './helpers.js';
 
-// Outcomes of commands whose initiating send was not counted, XState 5.33.2.
+// Outcomes of commands whose initiating send was not counted.
 const { tracer, spans, getSpan } = useTestTracer('command-outcomes');
 
 const outcome = 'actorium.xstate.operation.outcome';

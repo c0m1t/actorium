@@ -19,12 +19,13 @@ each combination:
 | `xstate`        | `@opentelemetry/api` |
 | --------------- | -------------------- |
 | 5.33.0 (lowest) | 1.9.0 (lowest)       |
-| 5.33.2          | latest 1.x           |
+| pinned          | latest 1.x           |
 | latest 5.x      |                      |
 
-"Latest" means the newest release that is at least a week old when the matrix
-runs. The range is wider than the tested set: a version inside it that the
-matrix has not run is not verified.
+"Pinned" is the version the repository develops against. "Latest" means the
+newest release that is at least a week old when the matrix runs. The range is
+wider than the tested set: a version inside it that the matrix has not run is
+not verified.
 
 ## What the library relies on
 

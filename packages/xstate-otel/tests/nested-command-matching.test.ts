@@ -4,7 +4,7 @@ import { XStateTracing } from '../src/index.js';
 import { createTestActor, expectReleased, internals, useTestTracer } from './helpers.js';
 
 // One event object sent twice to one actor, the second send nested inside the
-// first. XState 5.33.2 accepts the nested send first, so it is processed first:
+// first. XState accepts the nested send first, so it is processed first:
 // its inspection, then every inspection observer, then the actor's mailbox.
 const { tracer, getSpan } = useTestTracer('nested-command-matching');
 
