@@ -12,7 +12,7 @@ import {
   type InspectionEvent,
 } from 'xstate';
 import { describe, expect, it, vi } from 'vitest';
-import { XStateTracing, type CommandResult } from '../src/index.js';
+import { XStateTracing, type OperationResult } from '../src/index.js';
 import { deferred, useTestTracer } from './helpers.js';
 
 // The send matrix: how XState delivers an event to a target in each state,
@@ -399,8 +399,8 @@ interface OperationRow {
 }
 
 /** Tracks a command's result without awaiting it, since some stay open until the target starts. */
-function track(command: { finished: Promise<CommandResult> }) {
-  let result: CommandResult | undefined;
+function track(command: { finished: Promise<OperationResult> }) {
+  let result: OperationResult | undefined;
   void command.finished.then((value) => (result = value));
   return () => result?.outcome ?? 'open';
 }
@@ -411,7 +411,7 @@ describe('xstate-otel', () => {
     ['not inspected', false],
   ] as const)('ends sendCommand to a target %s', async (_, inspected) => {
     const rows = await forEachStateAsync(async (state) => {
-      const tracing = new XStateTracing(tracer, { onTelemetryError: () => {} });
+      const tracing = new XStateTracing(tracer, { onDiagnostic: () => {} });
       const target = createTarget(state, inspected ? tracing.inspect : undefined);
       const name = `command ${state} ${inspected}`;
       const [row] = await countingWarnings(async () => {
@@ -419,10 +419,10 @@ describe('xstate-otel', () => {
         target.deliver(() => {
           result = track(tracing.sendCommand(target.actor, { type: 'PING' }, { name }));
         });
-        await tracing.settle();
+        await tracing.waitForBookkeeping();
         const beforeStart = result();
         deliveryOf(target);
-        await tracing.settle();
+        await tracing.waitForBookkeeping();
         const row: OperationRow = {
           outcome: result(),
           reason: spansNamed(name)[0]?.attributes[reason] as string | undefined,
@@ -486,7 +486,7 @@ describe('xstate-otel', () => {
   ] as const)('records a %s relay to a target %s', async (relay, _, inspected) => {
     const rows = await forEachStateAsync(async (state) => {
       const tracing = new XStateTracing(tracer, {
-        onTelemetryError: () => {},
+        onDiagnostic: () => {},
         recordMicrosteps: true,
       });
       const target = createTarget(state, inspected ? tracing.inspect : undefined);
@@ -497,10 +497,10 @@ describe('xstate-otel', () => {
         target.deliver(() => {
           result = track(tracing.sendCommand(sender, { type: 'PING' }, { name }));
         });
-        await tracing.settle();
+        await tracing.waitForBookkeeping();
         const beforeStart = result();
         deliveryOf(target);
-        await tracing.settle();
+        await tracing.waitForBookkeeping();
         const span = spansNamed(name)[0];
         const row = {
           outcome: result(),
@@ -509,7 +509,7 @@ describe('xstate-otel', () => {
             .filter((event) => event.name === recipientTerminal)
             .map((event) => event.attributes?.[terminalReason]),
           processed: target.processed.length > 0,
-          // The recipient's turn joined the relay's operation.
+          // The recipient's processing joined the relay's operation.
           recipientMicrosteps: span?.events.filter(
             (event) =>
               event.name === microstep &&
@@ -580,19 +580,19 @@ describe('xstate-otel', () => {
     const rows: Record<string, unknown> = {};
 
     for (const state of ['running, idle', 'done after start'] as const) {
-      const tracing = new XStateTracing(tracer, { onTelemetryError: () => {} });
+      const tracing = new XStateTracing(tracer, { onDiagnostic: () => {} });
       const target = createTarget(state, tracing.inspect);
       const before = spans().length;
       await countingWarnings(async () => {
         target.actor.send({ type: 'PING' });
-        await tracing.settle();
+        await tracing.waitForBookkeeping();
       });
       rows[`plain send, ${state}`] = { operations: spans().length - before };
       target.stop();
     }
 
     for (const via of ['sendCommand', 'sendTo'] as const) {
-      const tracing = new XStateTracing(tracer, { onTelemetryError: () => {} });
+      const tracing = new XStateTracing(tracer, { onDiagnostic: () => {} });
       const target = createTarget('not started, active', tracing.inspect);
       const sender = relaySender(target.actor, 'sendTo', tracing.inspect);
       const command = tracing.sendCommand(
@@ -601,7 +601,7 @@ describe('xstate-otel', () => {
         { name: `${via} before stop` },
       );
       const result = track(command);
-      await tracing.settle();
+      await tracing.waitForBookkeeping();
       const beforeStop = result();
       target.stop();
       rows[`${via} to an observed actor stopped before it starts`] = {
@@ -614,7 +614,7 @@ describe('xstate-otel', () => {
     {
       // The stop abandons only that delivery; the operation still waits for
       // its other work, whose failure decides the outcome.
-      const tracing = new XStateTracing(tracer, { onTelemetryError: () => {} });
+      const tracing = new XStateTracing(tracer, { onDiagnostic: () => {} });
       const target = createTarget('not started, active', tracing.inspect);
       const work = deferred<string>();
       const sender = createActor(
@@ -637,9 +637,9 @@ describe('xstate-otel', () => {
       sender.start();
       const command = tracing.sendCommand(sender, { type: 'PING' }, { name: 'relay and work' });
       const result = track(command);
-      await tracing.settle();
+      await tracing.waitForBookkeeping();
       target.stop();
-      await tracing.settle();
+      await tracing.waitForBookkeeping();
       const afterStop = result();
       work.reject(new Error('work failed'));
       rows['sendTo to an observed actor stopped before it starts, then the sender fails'] = {
@@ -650,7 +650,7 @@ describe('xstate-otel', () => {
     }
 
     for (const parentStopped of [false, true]) {
-      const tracing = new XStateTracing(tracer, { onTelemetryError: () => {} });
+      const tracing = new XStateTracing(tracer, { onDiagnostic: () => {} });
       const work = deferred<string>();
       const parent = createActor(
         setup({
@@ -666,7 +666,7 @@ describe('xstate-otel', () => {
       ).start();
       const command = tracing.sendCommand(parent, { type: 'RUN' }, { name: 'with work' });
       const whileWorking = track(command);
-      await tracing.settle();
+      await tracing.waitForBookkeeping();
       const open = whileWorking();
       if (parentStopped) parent.stop();
       work.resolve('result');
@@ -681,8 +681,8 @@ describe('xstate-otel', () => {
 
     for (const variant of ['target running', 'target stopped first', 'sender stopped first']) {
       const tracing = new XStateTracing(tracer, {
-        onTelemetryError: () => {},
-        scheduledWorkPolicy: { mode: 'new-linked-operation', name: 'timer' },
+        onDiagnostic: () => {},
+        timerPolicy: { mode: 'new-linked-operation', name: 'timer' },
       });
       const target = createTarget('running, idle', tracing.inspect);
       const clock = new SimulatedClock();
@@ -698,7 +698,7 @@ describe('xstate-otel', () => {
         if (variant === 'target stopped first') target.stop();
         if (variant === 'sender stopped first') sender.stop();
         clock.increment(10);
-        await tracing.settle();
+        await tracing.waitForBookkeeping();
       });
       rows[`delayed sendTo, ${variant}`] = {
         timerOperations: spansNamed('timer')

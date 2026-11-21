@@ -47,7 +47,7 @@ export function createShowcaseServer(telemetry: Telemetry, showcase: Showcase): 
           span.setStatus({ code: SpanStatusCode.ERROR });
         }
         // Drain tracing bookkeeping so every operation of the run has ended.
-        await showcase.settle();
+        await showcase.waitForBookkeeping();
         span.setAttribute('http.response.status_code', status);
         span.end();
         const { traceId } = span.spanContext();

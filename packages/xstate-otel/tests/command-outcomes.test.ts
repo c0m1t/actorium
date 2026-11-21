@@ -134,7 +134,7 @@ describe('targets this runtime has not registered', () => {
 
 describe('registered terminal targets', () => {
   it('ends target_terminal with done, error or stopped', async () => {
-    const tracing = new XStateTracing(tracer, { onTelemetryError: vi.fn() });
+    const tracing = new XStateTracing(tracer, { onDiagnostic: vi.fn() });
     using done = createTestActor(initiallyDone, { inspect: tracing.inspect }).start();
     using failed = createTestActor(finishing, { inspect: tracing.inspect });
     failed.subscribe({ error: () => {} });
@@ -149,7 +149,7 @@ describe('registered terminal targets', () => {
     ).start();
     transition.stop();
     expect(transition.getSnapshot().status).toBe('active');
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
 
     const cases = [
       [done, 'registered.done', 'done'],
@@ -173,7 +173,7 @@ describe('registered terminal targets', () => {
   });
 
   it('accepts a command into the mailbox of a target whose initialization errored', async () => {
-    const tracing = new XStateTracing(tracer, { onTelemetryError: vi.fn() });
+    const tracing = new XStateTracing(tracer, { onDiagnostic: vi.fn() });
     using target = createTestActor(failingContext, { inspect: tracing.inspect });
     expect(target.getSnapshot().status).toBe('error');
     const relay = setup({}).createMachine({
@@ -215,7 +215,7 @@ describe('registered terminal targets', () => {
     // A plain send has no operation to record it on.
     const recorded = spans().length;
     target.send({ type: 'PLAIN' });
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spans()).toHaveLength(recorded);
 
     // start() discards the queued events without processing them.
@@ -228,7 +228,7 @@ describe('registered terminal targets', () => {
     // An errored start emits no snapshot inspection at all.
     expect(processed).toEqual([]);
     expect(target.getSnapshot().status).toBe('error');
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expectReleased(tracing, target, source);
   });
 
@@ -236,13 +236,13 @@ describe('registered terminal targets', () => {
     const tracing = new XStateTracing(tracer);
     using actor = createTestActor(counter, { inspect: tracing.inspect }).start();
     actor.stop();
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     const command = expectStoppedActorWarnings(actor, ['xstate.init'], () =>
       tracing.sendCommand(actor, { type: 'xstate.init' }, { name: 'init.named' }),
     );
     let result: unknown;
     void command.finished.then((value) => (result = value));
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(result).toEqual({ outcome: 'target_terminal', hadError: false });
     expect(getSpan('init.named').attributes[reason]).toBe('stopped');
     expectReleased(tracing, actor);
@@ -250,7 +250,7 @@ describe('registered terminal targets', () => {
 
   it('keeps native start bookkeeping for an init-named command before start', async () => {
     const diagnostic = vi.fn();
-    const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+    const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
     using actor = createTestActor(failingContext, { inspect: tracing.inspect });
     const command = tracing.sendCommand(actor, { type: 'xstate.init' }, { name: 'init.prestart' });
     await expect(command.finished).resolves.toEqual({
@@ -258,12 +258,12 @@ describe('registered terminal targets', () => {
       hadError: false,
     });
     expect(getSpan('init.prestart').attributes[reason]).toBe('error');
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     // Only the real start reports the initialization error.
     expect(diagnostic).not.toHaveBeenCalled();
     actor.subscribe({ error: () => {} });
     actor.start();
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
       phase: 'unassociatedRootError',
       error: actor.getSnapshot().error,
@@ -317,7 +317,7 @@ describe('registered terminal targets', () => {
 
 describe('active targets', () => {
   it('never classifies a target that ends while handling the command as terminal', async () => {
-    const tracing = new XStateTracing(tracer, { onTelemetryError: vi.fn() });
+    const tracing = new XStateTracing(tracer, { onDiagnostic: vi.fn() });
     using completing = createTestActor(finishing, { inspect: tracing.inspect }).start();
     using failing = createTestActor(finishing, { inspect: tracing.inspect });
     failing.subscribe({ error: () => {} });
@@ -395,7 +395,7 @@ describe('a throwing inspection observer', () => {
 
     expect(rethrown).toBe(failure);
     // The second operation started is the throwing command, inside the outer send.
-    expect(started.mock.results[1]?.value).toMatchObject({ pendingDeliveries: 0, ended: true });
+    expect(started.mock.results[1]?.value).toMatchObject({ pendingEventCount: 0, ended: true });
     started.mockRestore();
     const span = getSpan('throwing.inspector');
     expect(span.attributes[outcome]).toBe('failed');

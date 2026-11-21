@@ -2,7 +2,7 @@ import { diag, type Tracer } from '@opentelemetry/api';
 import type { AnyActorRef, AnyEventObject, InspectionEvent, PromiseActorLogic } from 'xstate';
 import { Diagnostics } from '../core/diagnostics.js';
 import { OperationRuntime } from '../core/runtime.js';
-import type { CommandEvent, CommandTrace, PromiseActorArgs } from '../core/types.js';
+import type { CommandEvent, OperationTrace, PromiseActorArgs } from '../core/types.js';
 import type {
   CreateXStateTracingOptions,
   FromPromiseOptions,
@@ -21,8 +21,8 @@ export function createXStateTracing(options: CreateXStateTracingOptions): XState
  * OpenTelemetry tracing for XState v5 actor systems.
  *
  * It intentionally knows nothing about machine state names. An operation stays
- * alive while it has traced finite child actors ("continuations"). Once the
- * event/macrostep has settled and no continuations remain, the operation ends.
+ * open while it has counted event processing or work registrations for traced
+ * Promise actors. Once both are gone, the operation ends.
  */
 export class XStateTracing {
   private readonly runtime: OperationRuntime<SendCommandOptions, TracedWorkOptions>;
@@ -43,11 +43,12 @@ export class XStateTracing {
   }
 
   /**
-   * Wait for currently queued/executing bookkeeping and its synchronous follow-ups.
-   * Does not await business work, stop actors, force span completion or export.
+   * Waits for currently queued or running bookkeeping groups and their synchronous
+   * follow-ups. Does not wait for business work or empty mailboxes, stop actors,
+   * force span completion or export.
    */
-  settle(): Promise<void> {
-    return this.runtime.settle();
+  waitForBookkeeping(): Promise<void> {
+    return this.runtime.waitForBookkeeping();
   }
 
   /**
@@ -58,18 +59,18 @@ export class XStateTracing {
     actor: TActor,
     event: CommandEvent<TActor>,
     options: SendCommandOptions,
-  ): CommandTrace;
+  ): OperationTrace;
   // The typed overload is a compile-time constraint only.
   sendCommand(
     actor: AnyActorRef,
     event: AnyEventObject,
     options: SendCommandOptions,
-  ): CommandTrace {
+  ): OperationTrace {
     return this.runtime.sendCommand(actor, event, options);
   }
 
   /**
-   * Runs a callback with the current command span active when `actor` is
+   * Runs a callback with the current operation span active when `actor` is
    * processing traced work. Useful for explicitly instrumented synchronous
    * actions; prefer invoked actors for asynchronous work.
    */

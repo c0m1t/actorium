@@ -82,7 +82,7 @@ describe('public stop delegation', () => {
         thrown = error;
       }
       expect(thrown).toBe(failure);
-      await tracing.settle();
+      await tracing.waitForBookkeeping();
       expect(finished).toBe(false);
       actor.stop();
       await expect(command.finished).resolves.toEqual({ outcome: 'cancelled', hadError: false });
@@ -200,7 +200,7 @@ describe('parent lookup', () => {
       const failure = new Error('work failed');
       const diagnostics = vi.fn((_diagnostic: TelemetryDiagnostic) => {});
       const tracing = new XStateTracing(tracer, {
-        onTelemetryError: diagnostics,
+        onDiagnostic: diagnostics,
         ...(mode === 'throwing'
           ? {
               resolveParentActor: () => {
@@ -250,7 +250,7 @@ describe('parent lookup', () => {
       resolveParentActor: () => {
         throw new Error('resolver failed');
       },
-      onTelemetryError: diagnostics,
+      onDiagnostic: diagnostics,
     });
     const work = tracing.fromPromise<string, object>('resolver.work', async () => 'done');
     const child = setup({ actors: { work } }).createMachine({

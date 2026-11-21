@@ -4,14 +4,14 @@ import type { LifecycleOptions, ShouldTraceArgs } from './core/types.js';
 
 export type {
   CommandEvent,
-  CommandOutcome,
-  CommandResult,
-  CommandTrace,
+  OperationOutcome,
+  OperationResult,
+  OperationTrace,
   PromiseActorArgs,
-  ScheduledWorkPolicy,
-  ScheduledWorkPolicyArgs,
   ShouldTraceArgs,
   TelemetryDiagnostic,
+  TimerPolicy,
+  TimerPolicyArgs,
 } from './core/types.js';
 
 /** The part of FromPromiseOptions read by the telemetry backend. */
@@ -57,7 +57,7 @@ export interface XStateTracingOptions extends LifecycleOptions {
    * segments; anything else throws at construction. `actorIdAttribute` and
    * `detailsUnavailableAttribute` still replace their full key.
    */
-  attributeNamespace?: string;
+  telemetryNamespace?: string;
   /** Synchronous replacement for default failure details; {} suppresses details. */
   errorDetails?: (error: unknown) => ErrorDetails;
   /** Attribute for unavailable error details; false disables it. */

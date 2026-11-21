@@ -37,7 +37,7 @@ export function createShowcase({
     // Microstep span events make relays between actors visible.
     recordMicrosteps: true,
     // Delayed XState events (the payment reminder) start a linked operation.
-    scheduledWorkPolicy: { mode: 'new-linked-operation', name: 'order.reminder' },
+    timerPolicy: { mode: 'new-linked-operation', name: 'order.reminder' },
   });
   const desk = createOrderDesk({ tracing, services, logger, idPrefix: 'order', reminderDelayMs });
 
@@ -45,7 +45,7 @@ export function createShowcase({
   const shopTracing = createXStateTracing({
     tracer,
     errorDetails,
-    attributeNamespace: 'shop.orders',
+    telemetryNamespace: 'shop.orders',
   });
   const shopDesk = createOrderDesk({
     tracing: shopTracing,
@@ -61,8 +61,8 @@ export function createShowcase({
     desk,
     shopDesk,
     /** Drains queued tracing bookkeeping of both runtimes. */
-    async settle(): Promise<void> {
-      await Promise.all([tracing.settle(), shopTracing.settle()]);
+    async waitForBookkeeping(): Promise<void> {
+      await Promise.all([tracing.waitForBookkeeping(), shopTracing.waitForBookkeeping()]);
     },
     stop(): void {
       desk.stop();

@@ -1,9 +1,9 @@
 import { raise, sendTo, setup, SimulatedClock, stopChild } from 'xstate';
 import { expect, it } from 'vitest';
 import {
-  getAttributeKeys,
+  getTelemetryNames,
   createXStateTracing,
-  DEFAULT_ATTRIBUTE_NAMESPACE,
+  DEFAULT_TELEMETRY_NAMESPACE,
   XStateTracing,
 } from '../src/index.js';
 import { expectStoppedActorWarnings, createTestActor, useTestTracer } from './helpers.js';
@@ -13,9 +13,9 @@ const { tracer, spans, spanNames, getSpan } = useTestTracer('attribute-namespace
 it('emits every name under the configured namespace, and only names from the table', async () => {
   const namespace = 'acme.workflows';
   const tracing = new XStateTracing(tracer, {
-    attributeNamespace: namespace,
+    telemetryNamespace: namespace,
     recordMicrosteps: true,
-    scheduledWorkPolicy: { mode: 'new-linked-operation' },
+    timerPolicy: { mode: 'new-linked-operation' },
   });
   const ok = tracing.fromPromise<string, object>('work.ok', async () => 'done');
   // No message or stack: exercises the unavailable-details marker.
@@ -61,8 +61,8 @@ it('emits every name under the configured namespace, and only names from the tab
   await waiting.finished;
   await send('LATER', 'later').finished;
   clock.increment(10);
-  await tracing.settle();
-  expect(spanNames()).toContain(`${namespace}.scheduled`);
+  await tracing.waitForBookkeeping();
+  expect(spanNames()).toContain(`${namespace}.timer_operation`);
   await expectStoppedActorWarnings(child, ['WORK'], () => send('DROP', 'drop')).finished;
   await expectStoppedActorWarnings(child, ['PING'], () =>
     tracing.sendCommand(child, { type: 'PING' }, { name: 'terminal' }),
@@ -89,14 +89,14 @@ it('emits every name under the configured namespace, and only names from the tab
       !name.startsWith('exception.'),
   );
   expect(unexpected).toEqual([]);
-  expect(namespaced.sort()).toEqual(Object.values(getAttributeKeys(namespace)).sort());
+  expect(namespaced.sort()).toEqual(Object.values(getTelemetryNames(namespace)).sort());
 });
 
 it('defaults to the actorium.xstate namespace', async () => {
-  expect(DEFAULT_ATTRIBUTE_NAMESPACE).toBe('actorium.xstate');
-  const keys = getAttributeKeys();
+  expect(DEFAULT_TELEMETRY_NAMESPACE).toBe('actorium.xstate');
+  const keys = getTelemetryNames();
   expect(keys.operationOutcome).toBe('actorium.xstate.operation.outcome');
-  expect(keys.scheduledSpan).toBe('actorium.xstate.scheduled');
+  expect(keys.timerOperationSpan).toBe('actorium.xstate.timer_operation');
   expect(Object.isFrozen(keys)).toBe(true);
   expect(new Set(Object.values(keys)).size).toBe(Object.keys(keys).length);
 
@@ -108,7 +108,7 @@ it('defaults to the actorium.xstate namespace', async () => {
 
 it('keeps full-key overrides ahead of the namespace', async () => {
   const tracing = new XStateTracing(tracer, {
-    attributeNamespace: 'acme',
+    telemetryNamespace: 'acme',
     actorIdAttribute: 'app.actor',
     detailsUnavailableAttribute: 'app.details_missing',
   });
@@ -134,18 +134,18 @@ it('keeps full-key overrides ahead of the namespace', async () => {
 
 it.each(['', 'Acme', 'acme.', '.acme', 'acme..workflows', 'acme-workflows', 'acme.Flows', '1acme'])(
   'rejects the invalid namespace %j at construction',
-  (attributeNamespace) => {
-    expect(() => new XStateTracing(tracer, { attributeNamespace })).toThrow(TypeError);
-    expect(() => createXStateTracing({ tracer, attributeNamespace })).toThrow(
-      /Invalid attributeNamespace/,
+  (telemetryNamespace) => {
+    expect(() => new XStateTracing(tracer, { telemetryNamespace })).toThrow(TypeError);
+    expect(() => createXStateTracing({ tracer, telemetryNamespace })).toThrow(
+      /Invalid telemetryNamespace/,
     );
-    expect(() => getAttributeKeys(attributeNamespace)).toThrow(TypeError);
+    expect(() => getTelemetryNames(telemetryNamespace)).toThrow(TypeError);
   },
 );
 
-it.each(['acme', 'acme.workflows', 'a1_b.c2'])('accepts the namespace %j', (attributeNamespace) => {
-  expect(getAttributeKeys(attributeNamespace).operationId).toBe(
-    `${attributeNamespace}.operation.id`,
+it.each(['acme', 'acme.workflows', 'a1_b.c2'])('accepts the namespace %j', (telemetryNamespace) => {
+  expect(getTelemetryNames(telemetryNamespace).operationId).toBe(
+    `${telemetryNamespace}.operation.id`,
   );
-  expect(() => new XStateTracing(tracer, { attributeNamespace })).not.toThrow();
+  expect(() => new XStateTracing(tracer, { telemetryNamespace })).not.toThrow();
 });

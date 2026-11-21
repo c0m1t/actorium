@@ -91,7 +91,7 @@ describe('commands', () => {
 
   it('marks root action failures as failed operations by default', async () => {
     const diagnostic = vi.fn();
-    const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+    const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
     const machine = setup({
       types: { events: {} as { type: 'RUN' } },
       actions: {
@@ -128,7 +128,7 @@ describe('commands', () => {
 
   it('marks root guard failures as failed operations', async () => {
     const diagnostic = vi.fn();
-    const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+    const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
     const machine = setup({
       types: { events: {} as { type: 'RUN' } },
       guards: {
@@ -168,7 +168,7 @@ describe('commands', () => {
 
   it('fails the command that errors and cancels deliveries queued behind it', async () => {
     const diagnostic = vi.fn();
-    const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+    const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
     let actor!: AnyActorRef;
     let queuedCommand!: ReturnType<typeof tracing.sendCommand>;
     const machine = setup({
@@ -256,7 +256,7 @@ describe('commands', () => {
     expect(spanNames()).not.toContain('command.prestart');
 
     actor.start();
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spanNames()).toContain('command.prestart');
 
     expect(actor.getSnapshot().matches('done')).toBe(true);
@@ -305,7 +305,7 @@ describe('checkout workflow', () => {
     basket.resolve({ id: 'B1', itemCount: 1 });
 
     await waitFor(actor, (snapshot) => snapshot.matches('ready'));
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spanNames()).toContain('checkout.add_item');
 
     const operation = getSpan('checkout.add_item');
@@ -348,7 +348,7 @@ describe('checkout workflow', () => {
     product.resolve({ id: 'P1', requiresRescan: true });
 
     await waitFor(actor, (snapshot) => snapshot.matches('waitingForRescan'));
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spanNames()).toContain('checkout.add_item');
 
     expect(addCalls).toBe(0);
@@ -388,7 +388,7 @@ describe('checkout workflow', () => {
 
     firstProduct.resolve({ id: 'P1', requiresRescan: true });
     await waitFor(actor, (snapshot) => snapshot.matches('waitingForRescan'));
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spansNamed('checkout.add_item')).toHaveLength(1);
 
     tracing.sendCommand(
@@ -402,7 +402,7 @@ describe('checkout workflow', () => {
 
     basket.resolve({ id: 'B1', itemCount: 1 });
     await waitFor(actor, (snapshot) => snapshot.matches('ready'));
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spansNamed('checkout.rescan_item')).toHaveLength(1);
 
     const firstOperation = getSpan('checkout.add_item');
@@ -456,9 +456,9 @@ describe('checkout workflow', () => {
     expect(actor.getSnapshot().matches('idle')).toBe(true);
     expect(observedSignal?.aborted).toBe(true);
 
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spansNamed('checkout.add_item')).toHaveLength(1);
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spansNamed('checkout.cancel')).toHaveLength(1);
 
     expect(getSpan('checkout.add_item').attributes['actorium.xstate.operation.outcome']).toBe(
@@ -497,7 +497,7 @@ describe('mailbox', () => {
       actions: {
         enqueueBThenC: () => {
           // These are re-entrant sends, so both deliveries occupy the mailbox
-          // before A's processing turn emits its snapshot. B is deliberately
+          // before A's processing emits its snapshot. B is deliberately
           // not a telemetry command; C is.
           actor.send({ type: 'B' });
           tracing.sendCommand(actor, { type: 'C' }, { name: 'command.c' });
@@ -529,7 +529,7 @@ describe('mailbox', () => {
     tracing.sendCommand(actor, { type: 'A' }, { name: 'command.a' });
 
     expect(actor.getSnapshot().matches('runningB')).toBe(true);
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spanNames()).toContain('command.c');
 
     // Incorrect mailbox ownership would let B inherit C and
@@ -574,7 +574,7 @@ describe('mailbox', () => {
     actor = createActor(machine, { inspect: tracing.inspect }).start();
     actor.send({ type: 'FINISH' });
 
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spanNames()).toContain('command.too_late');
     expect(getSpan('command.too_late').attributes['actorium.xstate.operation.outcome']).toBe(
       'cancelled',
@@ -621,7 +621,7 @@ describe('mailbox', () => {
     actor.send(event);
 
     expect(actor.getSnapshot().matches('second')).toBe(true);
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spansNamed('reused.work')).toHaveLength(1);
 
     second.resolve('done');
@@ -653,7 +653,7 @@ describe('microsteps', () => {
     using actor = createTestActor(machine, { inspect: tracing.inspect }).start();
 
     tracing.sendCommand(actor, { type: 'OUTER' }, { name: 'command.with_raise' });
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spanNames()).toContain('command.with_raise');
 
     const eventTypes = getSpan('command.with_raise').events.map(
@@ -731,7 +731,7 @@ describe('context propagation', () => {
 
     result.resolve('done');
     await waitFor(actor, (snapshot) => snapshot.matches('done'));
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spanNames()).toContain('nested.start');
 
     const operation = getSpan('nested.start');
@@ -812,15 +812,15 @@ describe('context propagation', () => {
     tracing.sendCommand(actor, { type: 'START' }, { name: 'parallel.start' });
 
     left.resolve('L');
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spanNames()).toContain('parallel.left');
 
-    // The operation is still open because rightActor is still a continuation.
+    // The operation is still open because rightActor still has a work registration.
     expect(spanNames()).not.toContain('parallel.start');
 
     right.resolve('R');
     await waitFor(actor, (snapshot) => snapshot.matches('done'));
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spanNames()).toContain('parallel.start');
 
     const operation = getSpan('parallel.start');
@@ -859,7 +859,7 @@ describe('context propagation', () => {
     httpSpan.end();
 
     await waitFor(actor, (snapshot) => snapshot.matches('waitingForRescan'));
-    await tracing.settle();
+    await tracing.waitForBookkeeping();
     expect(spansNamed('checkout.add_item')).toHaveLength(1);
 
     const operation = getSpan('checkout.add_item');

@@ -29,7 +29,7 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Commands', link: '/xstate-otel/guide/commands' },
       { text: 'Promise work', link: '/xstate-otel/guide/promise-work' },
       { text: 'Actor messages and actions', link: '/xstate-otel/guide/actor-messages' },
-      { text: 'Scheduled work', link: '/xstate-otel/guide/scheduled-work' },
+      { text: 'Timers', link: '/xstate-otel/guide/scheduled-work' },
       { text: 'Showcase', link: '/xstate-otel/guide/showcase' },
     ],
   },
@@ -38,7 +38,7 @@ const sidebar: DefaultTheme.SidebarItem[] = [
     items: [
       { text: 'HTTP and message boundaries', link: '/xstate-otel/recipes/http-boundaries' },
       { text: 'Frameworks', link: '/xstate-otel/recipes/frameworks' },
-      { text: 'Testing with settle()', link: '/xstate-otel/recipes/testing' },
+      { text: 'Testing with waitForBookkeeping()', link: '/xstate-otel/recipes/testing' },
     ],
   },
   {

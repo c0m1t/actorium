@@ -10,7 +10,7 @@ import {
   type AnyStateMachine,
 } from 'xstate';
 import { expect, it, vi } from 'vitest';
-import { XStateTracing, type CommandTrace } from '../src/index.js';
+import { XStateTracing, type OperationTrace } from '../src/index.js';
 import {
   deferred,
   createTestActor,
@@ -99,7 +99,7 @@ it.each(['root relay', 'callback reply', 'nested relay'] as const)(
   },
 );
 
-it('activates a pre-start command only during its processing turn', async () => {
+it('activates a pre-start command only while processing it', async () => {
   const tracing = new XStateTracing(tracer);
   const activeSpanId = (actor: AnyActorRef) =>
     tracing.withActiveOperation(actor, () => trace.getSpanContext(context.active())?.spanId);
@@ -185,7 +185,7 @@ it('retains the creating command for nested initialization ahead of a queued chi
     () => requested.promise,
   );
   let startupSpanId: string | undefined;
-  let childCommand: CommandTrace | undefined;
+  let childCommand: OperationTrace | undefined;
   const child = setup({ actors: { startupWork, requestedWork } }).createMachine({
     invoke: { src: 'startupWork', input: () => ({}) },
     entry: ({ self }) => {
@@ -248,7 +248,7 @@ it('retains the creating command for nested initialization ahead of a queued chi
 it('keeps raised microsteps in their macrostep when the same event is queued as another command', async () => {
   const tracing = new XStateTracing(tracer, { recordMicrosteps: true });
   const shared = Object.freeze({ type: 'SHARED' });
-  let queued: CommandTrace | undefined;
+  let queued: OperationTrace | undefined;
   using actor = createTestActor(
     setup({}).createMachine({
       on: {
@@ -279,7 +279,7 @@ it('keeps raised microsteps in their macrostep when the same event is queued as 
 
 it('cancels unprocessed pre-start commands when unrelated root initialization fails', async () => {
   const diagnostic = vi.fn();
-  const tracing = new XStateTracing(tracer, { onTelemetryError: diagnostic });
+  const tracing = new XStateTracing(tracer, { onDiagnostic: diagnostic });
   const failure = new Error('startup failed');
   const onError = vi.fn();
   using actor = createTestActor(

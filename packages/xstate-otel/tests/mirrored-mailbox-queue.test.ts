@@ -8,14 +8,14 @@ import {
   type AnyEventObject,
 } from 'xstate';
 import { expect, it, vi } from 'vitest';
-import { XStateTracing, type CommandTrace } from '../src/index.js';
+import { XStateTracing, type OperationTrace } from '../src/index.js';
 import {
   createTestActor,
   internals,
   expectStoppedActorWarnings,
   deferred,
   useTestTracer,
-  type DeliveryRecord,
+  type MirroredEntryRecord,
 } from './helpers.js';
 
 const { tracer, spansNamed, getSpan } = useTestTracer('delivery-queue');
@@ -137,7 +137,7 @@ it('reconciles a snapshot by identity while another delivery awaits acceptance',
   const outer = { type: 'NOTE', value: 'outer' };
   const inner = { type: 'NOTE', value: 'inner' };
   const received: string[] = [];
-  let nested: CommandTrace | undefined;
+  let nested: OperationTrace | undefined;
   using actor = createTestActor(
     setup({}).createMachine({
       on: {
@@ -171,7 +171,7 @@ it('reconciles a snapshot by identity while another delivery awaits acceptance',
 
 it('cancels a large mixed backlog without delivering or retaining discarded entries', async () => {
   const tracing = new XStateTracing(tracer);
-  const commands: CommandTrace[] = [];
+  const commands: OperationTrace[] = [];
   let received = 0;
   using actor = createTestActor(
     setup({}).createMachine({
@@ -349,7 +349,7 @@ it('keeps traced work open and completes it after a refused relay', async () => 
   void command.finished.then(() => {
     settled = true;
   });
-  await tracing.settle();
+  await tracing.waitForBookkeeping();
   expect(settled).toBe(false);
   pending.resolve('done');
   await expect(command.finished).resolves.toEqual({ outcome: 'completed', hadError: false });
@@ -436,7 +436,7 @@ it.each([true, false])(
   async (recording) => {
     const tracing = new XStateTracing(recording ? tracer : trace.getTracer('noop.rollback'));
     const failure = new Error('application inspector failed');
-    const rejected: DeliveryRecord[] = [];
+    const rejected: MirroredEntryRecord[] = [];
     const implementation = vi.fn(async () => 'done');
     const work = tracing.fromPromise<string, object>('rollback.work', implementation);
     using actor = createTestActor(
@@ -478,7 +478,7 @@ it.each([true, false])(
       expect(internals(tracing).pendingCommands.has(event)).toBe(false);
     }
     for (const delivery of rejected) {
-      expect(delivery.operation?.pendingDeliveries).toBe(0);
+      expect(delivery.operation?.pendingEventCount).toBe(0);
       expect(delivery.operation?.ended).toBe(true);
       await expect(delivery.operation?.finished).resolves.toEqual({
         outcome: 'failed',
@@ -504,13 +504,13 @@ it('rolls back only rejected commands in a mixed reentrant mailbox', async () =>
   const tracing = new XStateTracing(tracer);
   const failure = new Error('reentrant inspector failed');
   const shared = Object.freeze({ type: 'NOTE' });
-  const commands: CommandTrace[] = [];
+  const commands: OperationTrace[] = [];
   const caught: unknown[] = [];
-  const rejected: DeliveryRecord[] = [];
+  const rejected: MirroredEntryRecord[] = [];
   const seen: { event: AnyEventObject; operationId: number | undefined }[] = [];
   let reject = false;
-  let headAfterRollback: DeliveryRecord | undefined;
-  let queueAfterRollback: DeliveryRecord[] = [];
+  let headAfterRollback: MirroredEntryRecord | undefined;
+  let queueAfterRollback: MirroredEntryRecord[] = [];
   const work = tracing.fromPromise<string, object>('mixed.work', async () => 'done');
   using actor = createTestActor(
     setup({ actors: { work } }).createMachine({
@@ -586,7 +586,7 @@ it('rolls back only rejected commands in a mixed reentrant mailbox', async () =>
     undefined,
   ]);
   for (const delivery of rejected) {
-    expect(delivery.operation?.pendingDeliveries).toBe(0);
+    expect(delivery.operation?.pendingEventCount).toBe(0);
     await expect(delivery.operation?.finished).resolves.toEqual({
       outcome: 'failed',
       hadError: true,
@@ -602,8 +602,8 @@ it('restores accepted deliveries queued behind a rejected head', async () => {
   const failure = new Error('head inspector failed');
   const note = { type: 'NOTE' };
   const seen: AnyEventObject[] = [];
-  let accepted!: CommandTrace;
-  let rejected: DeliveryRecord | undefined;
+  let accepted!: OperationTrace;
+  let rejected: MirroredEntryRecord | undefined;
   const work = tracing.fromPromise<string, object>('head.work', async () => 'done');
   using actor = createTestActor(
     setup({ actors: { work } }).createMachine({
@@ -645,7 +645,7 @@ it('restores accepted deliveries queued behind a rejected head', async () => {
   expect(() => tracing.sendCommand(actor, { type: 'FAIL' }, { name: 'head.rejected' })).toThrow(
     failure,
   );
-  expect(rejected?.operation?.pendingDeliveries).toBe(0);
+  expect(rejected?.operation?.pendingEventCount).toBe(0);
   await expect(rejected?.operation?.finished).resolves.toEqual({
     outcome: 'failed',
     hadError: true,

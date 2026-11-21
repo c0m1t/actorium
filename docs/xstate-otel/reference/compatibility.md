@@ -42,7 +42,7 @@ change to verify:
   `resolveParentActor` must answer while the actor is being created, and the
   built-in resolver still runs as its fallback.
 - **Public methods it wraps.** A root actor's `stop()`, and, with
-  [scheduled work](../guide/scheduled-work.md) enabled, the system scheduler's
+  a [timer policy](../guide/scheduled-work.md) set, the system scheduler's
   `schedule` and `cancel` and the root clock's `setTimeout` and
   `clearTimeout`. XState's `cancelAll` must keep cancelling through `cancel`.
 - **Error and completion handoff.** A child's done or error event reaches its

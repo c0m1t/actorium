@@ -12,10 +12,10 @@ import {
   microstepStateValue,
   observeRootStop,
 } from '../xstate/actors.js';
-import { DeliveryQueue, type Delivery } from './delivery-queue.js';
+import { MirroredMailboxQueue, type MirroredMailboxEntry } from './mirrored-mailbox-queue.js';
 import type { Diagnostics } from './diagnostics.js';
-import type { ActorOperation, Continuation, Operation } from './operation.js';
-import { ScheduledWork, type ScheduledDelivery } from './scheduled-work.js';
+import type { ActorOperation, WorkRegistration, Operation } from './operation.js';
+import { TimerIntegration, type TimerRegistration } from './timers.js';
 import type {
   OperationStart,
   OperationTelemetry,
@@ -26,9 +26,9 @@ import type {
   WorkTelemetry,
 } from './telemetry.js';
 import type {
-  CommandOutcome,
-  CommandResult,
-  CommandTrace,
+  OperationOutcome,
+  OperationResult,
+  OperationTrace,
   LifecycleOptions,
   PromiseActorArgs,
   ShouldTraceArgs,
@@ -63,8 +63,8 @@ export interface WorkSelection<TInput> {
  * Backend-neutral operation lifecycle for XState v5 actor systems.
  *
  * It intentionally knows nothing about machine state names. An operation stays
- * alive while it has traced finite child actors ("continuations"). Once the
- * event/macrostep has settled and no continuations remain, the operation ends.
+ * open while it has counted event processing or work registrations for traced
+ * Promise actors. Once both are gone, the operation ends.
  * How operations and work are recorded is delegated to a TelemetryBackend.
  */
 export class OperationRuntime<TCommandOptions, TWorkOptions> {
@@ -78,22 +78,22 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
   private readonly startedActors = new WeakSet<ActorRefLike>();
   private readonly lifecycleChecks = new WeakSet<AnyActorRef>();
   private readonly terminalActors = new WeakSet<AnyActorRef>();
-  private readonly scheduledWork: ScheduledWork;
+  private readonly timers: TimerIntegration;
   /** Commands waiting for the matching, synchronously emitted @xstate.event. */
   private readonly pendingCommands = new WeakMap<object, PendingCommand[]>();
   private readonly actorOperations = new WeakMap<ActorRefLike, ActorOperation>();
-  private readonly actorContinuations = new WeakMap<AnyActorRef, Continuation>();
+  private readonly actorWorkRegistrations = new WeakMap<AnyActorRef, WorkRegistration>();
 
-  /** Every delivery is recorded, including deliveries that are not traced. */
-  private readonly processing = new WeakMap<ActorRefLike, Delivery>();
+  /** Every mirrored mailbox entry is recorded, including entries that are not traced. */
+  private readonly processing = new WeakMap<ActorRefLike, MirroredMailboxEntry>();
 
   /**
    * @xstate.event is emitted before an event is put through the actor mailbox.
    * If an actor is already processing, later events can be observed before they
    * are handled. This must mirror the complete mailbox, not just traced events,
-   * or an untraced delivery can accidentally inherit a later command's trace.
+   * or an untraced event can accidentally inherit a later command's trace.
    */
-  private readonly queued = new WeakMap<ActorRefLike, DeliveryQueue>();
+  private readonly queued = new WeakMap<ActorRefLike, MirroredMailboxQueue>();
 
   private nextOperationId = 1;
 
@@ -109,16 +109,17 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     this.telemetry = telemetry;
     this.diagnostics = diagnostics;
     this.options = options;
-    this.scheduledWork = new ScheduledWork(options.scheduledWorkPolicy, diagnostics, (actor) =>
+    this.timers = new TimerIntegration(options.timerPolicy, diagnostics, (actor) =>
       this.operationForActor(actor),
     );
   }
 
   /**
-   * Wait for currently queued/executing bookkeeping and its synchronous follow-ups.
-   * Does not await business work, stop actors, force span completion or export.
+   * Waits for currently queued or running bookkeeping groups and their synchronous
+   * follow-ups. Does not wait for business work or empty mailboxes, stop actors,
+   * force span completion or export.
    */
-  settle(): Promise<void> {
+  waitForBookkeeping(): Promise<void> {
     const groups = [...this.bookkeeping];
     if (groups.length === 0) return Promise.resolve();
     return new Promise<void>((resolve) => {
@@ -156,7 +157,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
       case '@xstate.actor': {
         this.observeActor(inspection.actorRef as AnyActorRef);
         // Invoked machine actors run their initial input mappers before their
-        // xstate.init delivery is inspected. Capture the creating parent's
+        // xstate.init event is inspected. Capture the creating parent's
         // current operation so nested actors can join it during initialization.
         const parent = this.resolveParentActor(inspection.actorRef);
         if (!parent) this.rootActors.add(inspection.actorRef);
@@ -173,7 +174,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
         if (inspection.sourceRef) {
           this.reconcileActorLifecycle(inspection.sourceRef as AnyActorRef);
         }
-        const dispatch = this.scheduledWork.claimDispatch(
+        const dispatch = this.timers.claimDispatch(
           inspection.sourceRef,
           inspection.actorRef,
           inspection.event,
@@ -183,7 +184,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
         if (!this.observedActors.has(inspection.actorRef)) {
           return;
         }
-        // An explicit command always owns its delivery, whatever its type.
+        // An explicit command always owns its event, whatever its type.
         // XState creates its own init event object, so it never matches one.
         const command = this.shiftPendingCommand(inspection.event, inspection.actorRef);
         const nativeInit = !command && inspection.event.type === 'xstate.init';
@@ -223,34 +224,30 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
           command.state = { status: 'counted' };
         }
         const directlyAssociated = command?.operation;
-        const scheduled = dispatch?.scheduled;
+        const timer = dispatch?.timer;
         const operation =
           directlyAssociated ??
           (dispatch
-            ? scheduled
-              ? this.operationForScheduledDelivery(
-                  inspection.actorRef as AnyActorRef,
-                  inspection.event,
-                  scheduled,
-                )
+            ? timer
+              ? this.operationForTimer(inspection.actorRef as AnyActorRef, inspection.event, timer)
               : undefined
             : inspection.event.type === 'xstate.init'
               ? this.actorOperations.get(inspection.actorRef)?.operation
               : this.operationForIncomingEvent(inspection.event, inspection.sourceRef));
-        if (scheduled) {
-          this.scheduledWork.remove(scheduled);
+        if (timer) {
+          this.timers.remove(timer);
         }
 
         if (operation?.ended) {
-          this.enqueueDelivery(inspection.actorRef, inspection.event, undefined);
+          this.enqueueEntry(inspection.actorRef, inspection.event, undefined);
           return;
         }
 
         if (operation) {
-          operation.pendingDeliveries += 1;
+          operation.pendingEventCount += 1;
         }
 
-        this.enqueueDelivery(inspection.actorRef, inspection.event, operation);
+        this.enqueueEntry(inspection.actorRef, inspection.event, operation);
         return;
       }
 
@@ -263,7 +260,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
             this.stopObservedActor(child as AnyActorRef);
           }
         }
-        this.scheduledWork.observeAction(
+        this.timers.observeAction(
           inspection.actorRef as AnyActorRef,
           inspection.action.type,
           inspection.action.params,
@@ -291,12 +288,12 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
         // Deferred startup effects can fail after the notification's snapshot
         // was captured. Read the actor's current public snapshot instead.
         this.reconcileActorLifecycle(actorRef, inspection.event.type === 'xstate.stop');
-        const delivery = this.finishDelivery(inspection.actorRef, inspection.event);
-        const operation = delivery?.operation;
+        const entry = this.finishEntry(inspection.actorRef, inspection.event);
+        const operation = entry?.operation;
 
-        // A snapshot closes one delivered event / one actor processing turn.
+        // A snapshot closes the processing of one mirrored event (one macrostep).
         if (operation && !operation.ended) {
-          operation.pendingDeliveries = Math.max(0, operation.pendingDeliveries - 1);
+          operation.pendingEventCount = Math.max(0, operation.pendingEventCount - 1);
 
           this.maybeEndOperation(operation);
         }
@@ -304,21 +301,26 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
         // A terminal actor will never consume anything left in its mailbox.
         if (inspection.snapshot.status !== 'active' || inspection.event.type === 'xstate.stop') {
           this.stoppedActors.add(actorRef);
-          this.cancelQueuedDeliveries(inspection.actorRef);
-          this.scheduledWork.cancel(inspection.actorRef as AnyActorRef);
+          this.cancelMirroredEntries(inspection.actorRef);
+          this.timers.cancel(inspection.actorRef as AnyActorRef);
         }
 
         if (inspection.event.type === 'xstate.init') {
           this.clearActorOperation(inspection.actorRef);
         }
 
-        // A finite traced child remains a continuation until XState itself says
-        // the actor is terminal. This is deliberately later than Promise.resolve:
-        // by then XState has relayed onDone/onError to the parent, allowing the
-        // parent macrostep to start a replacement continuation first.
-        const continuation = this.actorContinuations.get(actorRef);
-        if (continuation && inspection.snapshot.status !== 'active') {
-          this.releaseContinuation(actorRef, inspection.snapshot.status, inspection.snapshot.error);
+        // A traced Promise actor keeps its work registration until XState itself
+        // says the actor is terminal. This is deliberately later than
+        // Promise.resolve: by then XState has relayed onDone/onError to the
+        // parent (the completion handoff), so the parent macrostep can start
+        // replacement work first.
+        const registration = this.actorWorkRegistrations.get(actorRef);
+        if (registration && inspection.snapshot.status !== 'active') {
+          this.releaseWorkRegistration(
+            actorRef,
+            inspection.snapshot.status,
+            inspection.snapshot.error,
+          );
         }
         return;
       }
@@ -328,7 +330,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     }
   };
 
-  sendCommand(actor: AnyActorRef, event: AnyEventObject, options: TCommandOptions): CommandTrace {
+  sendCommand(actor: AnyActorRef, event: AnyEventObject, options: TCommandOptions): OperationTrace {
     const operation = this.startOperation(actor, event, {
       cause: 'command',
       actor,
@@ -355,7 +357,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
       actor.send(event);
     } catch (error) {
       this.removePendingCommand(event, command);
-      this.rollbackCommandDeliveries(actor, operation);
+      this.rollbackCommandEntries(actor, operation);
       this.failOperation(operation, error);
       throw error;
     }
@@ -431,7 +433,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
         self: actorRef,
         options,
       });
-      const continuation = this.registerContinuation(actorRef, operation, work);
+      const registration = this.registerWork(actorRef, operation, work);
 
       try {
         return await work.run(() =>
@@ -446,21 +448,21 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
       } catch (error) {
         // The XState stop snapshot can arrive before the underlying aborted
         // Promise rejects. Never mutate a span after the inspector ended it.
-        if (!continuation.spanEnded) {
+        if (!registration.spanEnded) {
           if (signal.aborted && isAbortError(error)) {
             work.cancelled();
           } else {
             operation.hadError = true;
-            this.recordFailure(operation, work, error, () => continuation.spanEnded);
+            this.recordFailure(operation, work, error, () => registration.spanEnded);
           }
         }
         throw error;
       } finally {
         // End the work span when the Promise work itself ends, but DO NOT
-        // release the continuation here. XState still needs to process the
+        // release the work registration here. XState still needs to process the
         // resulting onDone/onError event. The inspector releases it when the
         // child actor reaches its terminal snapshot.
-        this.endContinuationSpan(actorRef);
+        this.endWorkSpan(actorRef);
       }
     });
   }
@@ -472,25 +474,25 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
   ): Operation {
     const telemetry = this.telemetry.startOperation(start);
 
-    let resolveFinished!: (result: CommandResult) => void;
-    const finished = new Promise<CommandResult>((resolve) => {
+    let resolveFinished!: (result: OperationResult) => void;
+    const finished = new Promise<OperationResult>((resolve) => {
       resolveFinished = resolve;
     });
 
     const operation: Operation = {
       id: this.nextOperationId++,
-      rootActor: actor,
+      targetActor: actor,
       telemetry,
-      continuations: new Set(),
+      workRegistrations: new Set(),
       associatedActors: new Set(),
-      pendingDeliveries: 0,
+      pendingEventCount: 0,
       endScheduled: false,
       ended: false,
       cancelled: false,
       hadError: false,
       errorCount: 0,
       terminalRecipientEvents: 0,
-      rootFailed: false,
+      targetFailed: false,
       finished,
       resolveFinished,
     };
@@ -507,7 +509,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
       const source = sourceRef as AnyActorRef;
 
       // onDone/onError from a traced finite child.
-      const childOperation = this.actorContinuations.get(source)?.operation;
+      const childOperation = this.actorWorkRegistrations.get(source)?.operation;
       if (childOperation) {
         return childOperation;
       }
@@ -523,24 +525,24 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     return undefined;
   }
 
-  private operationForScheduledDelivery(
+  private operationForTimer(
     actor: AnyActorRef,
     event: AnyEventObject,
-    scheduled: ScheduledDelivery,
+    timer: TimerRegistration,
   ): Operation | undefined {
-    if (scheduled.policy.mode === 'untraced') {
+    if (timer.policy.mode === 'untraced') {
       return undefined;
     }
 
     return this.startOperation(actor, event, {
-      cause: 'scheduled',
+      cause: 'timer',
       actor,
       event,
-      name: scheduled.policy.name,
-      origin: scheduled.origin,
-      originOperationId: scheduled.originOperationId,
-      actionType: scheduled.actionType,
-      delayMs: scheduled.delayMs,
+      name: timer.policy.name,
+      origin: timer.origin,
+      originOperationId: timer.originOperationId,
+      actionType: timer.actionType,
+      delayMs: timer.delayMs,
     });
   }
 
@@ -550,16 +552,16 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     if (!this.startedActors.has(actor)) {
       return this.actorOperations.get(actor)?.operation;
     }
-    const delivery = this.processing.get(actor);
-    return delivery ? delivery.operation : this.actorOperations.get(actor)?.operation;
+    const entry = this.processing.get(actor);
+    return entry ? entry.operation : this.actorOperations.get(actor)?.operation;
   }
 
-  private enqueueDelivery(
+  private enqueueEntry(
     actor: ActorRefLike,
     event: AnyEventObject,
     operation: Operation | undefined,
   ): void {
-    const item: Delivery = { event, operation, previous: undefined, next: undefined };
+    const item: MirroredMailboxEntry = { event, operation, previous: undefined, next: undefined };
 
     const current = this.processing.get(actor);
     if (!current) {
@@ -567,10 +569,10 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
       return;
     }
 
-    const queue = this.queued.get(actor) ?? new DeliveryQueue();
+    const queue = this.queued.get(actor) ?? new MirroredMailboxQueue();
     if (event.type === 'xstate.init') {
       // XState runs init ahead of events accepted before start(). Make the
-      // actual init turn active, then restore the original mailbox head when
+      // actual init processing active, then restore the original mailbox head when
       // its snapshot settles. Queued commands cannot own startup work.
       queue.prepend(current);
       this.processing.set(actor, item);
@@ -580,7 +582,10 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     this.queued.set(actor, queue);
   }
 
-  private finishDelivery(actor: ActorRefLike, event: AnyEventObject): Delivery | undefined {
+  private finishEntry(
+    actor: ActorRefLike,
+    event: AnyEventObject,
+  ): MirroredMailboxEntry | undefined {
     const current = this.processing.get(actor);
 
     if (current?.event !== event) {
@@ -610,7 +615,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     return current;
   }
 
-  private rollbackCommandDeliveries(actor: ActorRefLike, operation: Operation): void {
+  private rollbackCommandEntries(actor: ActorRefLike, operation: Operation): void {
     // Inspection precedes mailbox acceptance. A later inspector can throw
     // after we recorded the command, leaving no snapshot to consume it. Remove
     // only this operation's records, preserving every other mailbox entry.
@@ -630,7 +635,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     if (queue?.length === 0) {
       this.queued.delete(actor);
     }
-    operation.pendingDeliveries = Math.max(0, operation.pendingDeliveries - removed);
+    operation.pendingEventCount = Math.max(0, operation.pendingEventCount - removed);
   }
 
   private operationForMicrostep(actor: ActorRefLike, event: AnyEventObject): Operation | undefined {
@@ -643,9 +648,9 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     }
 
     // Raised/internal events produce microsteps inside the current macrostep
-    // without producing their own @xstate.event delivery. Attribute those to
+    // without producing their own @xstate.event inspection. Attribute those to
     // the macrostep. xstate.init is the exception: for a pre-start queued event,
-    // its initial microstep can occur before the init delivery is inspected.
+    // its initial microstep can occur before the init event is inspected.
     if (event.type === 'xstate.init') {
       return undefined;
     }
@@ -655,18 +660,18 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     return current.operation;
   }
 
-  private cancelQueuedDeliveries(actor: ActorRefLike): void {
+  private cancelMirroredEntries(actor: ActorRefLike): void {
     const current = this.processing.get(actor);
     const queue = this.queued.get(actor);
     this.queued.delete(actor);
     this.processing.delete(actor);
 
-    for (let delivery = current ?? queue?.takeFirst(); delivery; delivery = queue?.takeFirst()) {
-      const operation = delivery.operation;
+    for (let entry = current ?? queue?.takeFirst(); entry; entry = queue?.takeFirst()) {
+      const operation = entry.operation;
       if (!operation || operation.ended) {
         continue;
       }
-      operation.pendingDeliveries = Math.max(0, operation.pendingDeliveries - 1);
+      operation.pendingEventCount = Math.max(0, operation.pendingEventCount - 1);
       operation.cancelled = true;
       this.maybeEndOperation(operation);
     }
@@ -675,8 +680,9 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
   private deferLifecycleCheck(actor: AnyActorRef): void {
     if (this.lifecycleChecks.has(actor) || this.terminalActors.has(actor)) return;
     this.lifecycleChecks.add(actor);
-    // Error paths can omit snapshot inspection. One public snapshot check per
-    // actor/turn observes them without subscribing to (and consuming) errors.
+    // Error paths can omit snapshot inspection. One pending public snapshot
+    // check per actor, shared by every send inspected before it runs, observes
+    // them without subscribing to (and consuming) errors.
     this.scheduleBookkeeping(() => {
       this.lifecycleChecks.delete(actor);
       this.reconcileActorLifecycle(actor);
@@ -704,11 +710,11 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     if (this.observedActors.has(actor)) {
       return;
     }
-    if (this.scheduledWork.enabled) {
+    if (this.timers.enabled) {
       // Invalid integration is a setup error, before business initialization.
-      // Do not turn it into an unmarked native timer fallback.
+      // Do not fall back to an unmarked native timer fallback.
       try {
-        this.scheduledWork.instrument(actor);
+        this.timers.instrument(actor);
       } catch (error) {
         this.diagnostics.report({ phase: 'scheduler', error });
         throw error;
@@ -757,10 +763,10 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     }
     this.terminalActors.add(actor);
     this.stoppedActors.add(actor);
-    this.cancelQueuedDeliveries(actor);
-    this.scheduledWork.cancel(actor);
+    this.cancelMirroredEntries(actor);
+    this.timers.cancel(actor);
     this.clearActorOperation(actor);
-    this.releaseContinuation(actor, 'stopped');
+    this.releaseWorkRegistration(actor, 'stopped');
   }
 
   private handleActorError(actor: AnyActorRef, error: unknown): void {
@@ -770,7 +776,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     const operation =
       current?.operation ??
       this.actorOperations.get(actor)?.operation ??
-      this.actorContinuations.get(actor)?.operation;
+      this.actorWorkRegistrations.get(actor)?.operation;
     const rootErrorPhase = this.rootActors.has(actor)
       ? operation && !operation.ended
         ? 'associatedRootError'
@@ -778,12 +784,12 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
       : undefined;
     if (operation && !operation.ended) {
       operation.hadError = true;
-      if (operation.rootActor === actor) {
-        operation.rootFailed = true;
+      if (operation.targetActor === actor) {
+        operation.targetFailed = true;
         this.recordFailure(operation, operation.telemetry, error, () => operation.ended);
       }
       if (current?.operation === operation) {
-        operation.pendingDeliveries = Math.max(0, operation.pendingDeliveries - 1);
+        operation.pendingEventCount = Math.max(0, operation.pendingEventCount - 1);
       }
       this.maybeEndOperation(operation);
       // The parent's onError relay occurs after error observers, and can start
@@ -793,14 +799,14 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     }
 
     // XState clears its mailbox when an actor errors. Close our mirrored
-    // deliveries and schedules too, marking later queued commands as
+    // entries and timers too, marking later queued commands as
     // cancelled.
-    this.cancelQueuedDeliveries(actor);
-    this.scheduledWork.cancel(actor);
+    this.cancelMirroredEntries(actor);
+    this.timers.cancel(actor);
     this.stoppedActors.add(actor);
     this.scheduleBookkeeping(() => {
       this.clearActorOperation(actor);
-      this.releaseContinuation(actor, 'error', error);
+      this.releaseWorkRegistration(actor, 'error', error);
     });
     if (rootErrorPhase) {
       this.diagnostics.report({ phase: rootErrorPhase, error });
@@ -825,7 +831,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
   ): PendingCommand | undefined {
     const pending = this.pendingCommands.get(event);
     const index =
-      pending?.findLastIndex(({ operation }) => operation.rootActor === recipient) ?? -1;
+      pending?.findLastIndex(({ operation }) => operation.targetActor === recipient) ?? -1;
     const command = index === -1 ? undefined : pending?.splice(index, 1)[0];
     if (pending?.length === 0) {
       this.pendingCommands.delete(event);
@@ -847,48 +853,48 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     }
   }
 
-  private registerContinuation(
+  private registerWork(
     actor: AnyActorRef,
     operation: Operation,
     telemetry: WorkTelemetry,
-  ): Continuation {
-    const continuation: Continuation = {
+  ): WorkRegistration {
+    const registration: WorkRegistration = {
       operation,
       telemetry,
       spanEnded: false,
     };
 
-    operation.continuations.add(actor);
-    this.actorContinuations.set(actor, continuation);
-    return continuation;
+    operation.workRegistrations.add(actor);
+    this.actorWorkRegistrations.set(actor, registration);
+    return registration;
   }
 
-  private endContinuationSpan(actor: AnyActorRef): void {
-    const continuation = this.actorContinuations.get(actor);
-    if (!continuation || continuation.spanEnded) {
+  private endWorkSpan(actor: AnyActorRef): void {
+    const registration = this.actorWorkRegistrations.get(actor);
+    if (!registration || registration.spanEnded) {
       return;
     }
 
-    continuation.spanEnded = true;
-    continuation.telemetry.end();
+    registration.spanEnded = true;
+    registration.telemetry.end();
   }
 
-  private releaseContinuation(actor: AnyActorRef, status: string, error?: unknown): void {
-    const continuation = this.actorContinuations.get(actor);
-    if (!continuation) {
+  private releaseWorkRegistration(actor: AnyActorRef, status: string, error?: unknown): void {
+    const registration = this.actorWorkRegistrations.get(actor);
+    if (!registration) {
       return;
     }
 
-    const { operation, telemetry } = continuation;
+    const { operation, telemetry } = registration;
 
-    if (!continuation.spanEnded) {
+    if (!registration.spanEnded) {
       if (status === 'stopped') {
         telemetry.cancelled();
       } else if (status === 'error') {
-        this.recordFailure(operation, telemetry, error, () => continuation.spanEnded);
+        this.recordFailure(operation, telemetry, error, () => registration.spanEnded);
       }
-      if (!continuation.spanEnded) {
-        continuation.spanEnded = true;
+      if (!registration.spanEnded) {
+        registration.spanEnded = true;
         telemetry.end();
       }
     }
@@ -900,8 +906,8 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
       operation.hadError = true;
     }
 
-    operation.continuations.delete(actor);
-    this.actorContinuations.delete(actor);
+    operation.workRegistrations.delete(actor);
+    this.actorWorkRegistrations.delete(actor);
     this.maybeEndOperation(operation);
   }
 
@@ -912,8 +918,8 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
 
     // Do not end synchronously at the first observed zero. XState may be in the
     // middle of handing a child completion back to its parent, which can start
-    // the next finite invoke in the same turn. Rechecking in a microtask makes
-    // the continuation hand-off robust without knowing any state names.
+    // the next finite invoke in the same macrostep. Rechecking in a microtask makes
+    // the completion handoff robust without knowing any state names.
     operation.endScheduled = true;
 
     this.scheduleBookkeeping(() => {
@@ -921,13 +927,13 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
 
       if (
         operation.ended ||
-        operation.pendingDeliveries !== 0 ||
-        operation.continuations.size !== 0
+        operation.pendingEventCount !== 0 ||
+        operation.workRegistrations.size !== 0
       ) {
         return;
       }
 
-      const outcome = operation.rootFailed
+      const outcome = operation.targetFailed
         ? 'failed'
         : operation.cancelled
           ? 'cancelled'
@@ -937,7 +943,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     });
   }
 
-  // Callers own the operation/continuation end guard; the backend deduplicates
+  // Callers own the operation/work registration end guard; the backend deduplicates
   // per record, since Promise rejection and actor reconciliation can observe
   // one failure.
   private recordFailure(
@@ -961,7 +967,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
 
   private finishOperation(
     operation: Operation,
-    outcome: CommandOutcome,
+    outcome: OperationOutcome,
     outcomeReason?: OutcomeReason,
   ): void {
     if (operation.ended) {
@@ -982,7 +988,7 @@ export class OperationRuntime<TCommandOptions, TWorkOptions> {
     operation.resolveFinished({ outcome, hadError: operation.hadError });
   }
 
-  private commandTrace(operation: Operation): CommandTrace {
+  private commandTrace(operation: Operation): OperationTrace {
     const { traceId, spanId } = operation.telemetry.ids();
     return {
       operationId: operation.id,

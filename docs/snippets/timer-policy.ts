@@ -5,7 +5,7 @@ import { createActor, setup, SimulatedClock } from 'xstate';
 const tracing = createXStateTracing({
   tracer: trace.getTracer('editor'),
   // Any policy installs the scheduler integration; a callback can decide per timer.
-  scheduledWorkPolicy: { mode: 'new-linked-operation', name: 'editor.autosave' },
+  timerPolicy: { mode: 'new-linked-operation', name: 'editor.autosave' },
 });
 
 const save = tracing.fromPromise('document.save', async () => {});

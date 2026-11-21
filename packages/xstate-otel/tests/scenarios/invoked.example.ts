@@ -42,7 +42,7 @@ export async function invokedExample(h: Harness) {
     'PASS: nested invoked machine → traced Promise → parent onDone → traced Promise stays in one operation.',
   );
   h.findings.push(
-    'LIMIT: invoked machines have no own span/continuation; only their wrapped Promise work keeps the operation open. Initialization relies on XState _parent.',
+    'LIMIT: invoked machines have no own span or work registration; only their wrapped Promise work keeps the operation open. Initialization relies on XState _parent.',
   );
 
   const load = Object.freeze(async (sku: string) => {
@@ -93,7 +93,7 @@ export async function invokedExample(h: Harness) {
     'PASS: a frozen function input reaches its Promise actor unchanged and its finite work belongs to the command.',
   );
 
-  // Models a socket/subscription delivering a result in a later turn.
+  // Models a socket/subscription delivering a result in a later callback.
   let respond: (() => void) | undefined;
   let disposed = false;
   const callback = fromCallback(({ sendBack }) => {
@@ -131,7 +131,7 @@ export async function invokedExample(h: Harness) {
   assert.ok(h.calls.includes('invoked.callback.work'));
   assert.equal(h.has('invoked.callback.work'), false);
   h.findings.push(
-    'GAP: a callback actor reply in a later turn has no operation; work started by its sendBack is untraced. Its cleanup still runs normally.',
+    'GAP: a callback actor reply sent from a later callback has no operation; work started by its sendBack is untraced. Its cleanup still runs normally.',
   );
 
   const startupWorker = setup({ actors: { work: h.work('prestart.startup.work') } }).createMachine({
@@ -184,7 +184,7 @@ export async function invokedExample(h: Harness) {
 
   const diagnostics: TelemetryDiagnostic[] = [];
   const errorTracing = new XStateTracing(h.tracer, {
-    onTelemetryError: (diagnostic) => diagnostics.push(diagnostic),
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
   });
   const failure = new Error('untraced root failure');
   const applicationErrors: unknown[] = [];

@@ -2,11 +2,9 @@ import type { ActorRef, ActorRefLike, AnyActorRef, AnyEventObject } from 'xstate
 
 // Public types that do not depend on a telemetry backend.
 
-export type ScheduledWorkPolicy =
-  | { mode: 'untraced' }
-  | { mode: 'new-linked-operation'; name?: string };
+export type TimerPolicy = { mode: 'untraced' } | { mode: 'new-linked-operation'; name?: string };
 
-export interface ScheduledWorkPolicyArgs {
+export interface TimerPolicyArgs {
   actor: AnyActorRef;
   actionType: 'xstate.raise' | 'xstate.sendTo';
   event: AnyEventObject;
@@ -35,7 +33,7 @@ export interface TelemetryDiagnostic {
     | 'operationAttributes'
     | 'workAttributes'
     | 'shouldTrace'
-    | 'scheduledWorkPolicy'
+    | 'timerPolicy'
     | 'resolveParentActor'
     | 'scheduler'
     | 'unassociatedRootError'
@@ -46,16 +44,14 @@ export interface TelemetryDiagnostic {
 /** Options read by the lifecycle runtime. Telemetry presentation options live with the backend. */
 export interface LifecycleOptions {
   /** Optional protected diagnostics; root reports may follow send/start in a microtask. */
-  onTelemetryError?: (diagnostic: TelemetryDiagnostic) => void;
+  onDiagnostic?: (diagnostic: TelemetryDiagnostic) => void;
   /**
    * Opts into native timer integration for delayed XState `raise` and `sendTo`
    * actions, including `after`. Unset installs no scheduler hooks. Decisions
    * are validated and copied per action; timers never hold an operation open.
    * Unsupported clock/scheduler delegation throws during actor creation.
    */
-  scheduledWorkPolicy?:
-    | ScheduledWorkPolicy
-    | ((args: ScheduledWorkPolicyArgs) => ScheduledWorkPolicy);
+  timerPolicy?: TimerPolicy | ((args: TimerPolicyArgs) => TimerPolicy);
   resolveParentActor?: (actor: ActorRefLike) => ActorRefLike | undefined;
 }
 
@@ -73,21 +69,21 @@ export type CommandEvent<TActor extends AnyActorRef> =
     : AnyEventObject;
 
 /** See the outcomes reference for definitions, reasons and precedence. */
-export type CommandOutcome =
+export type OperationOutcome =
   | 'completed'
   | 'cancelled'
   | 'failed'
   | 'target_terminal'
   | 'unobserved';
 
-export interface CommandResult {
-  readonly outcome: CommandOutcome;
+export interface OperationResult {
+  readonly outcome: OperationOutcome;
   readonly hadError: boolean;
 }
 
-export interface CommandTrace {
+export interface OperationTrace {
   readonly operationId: number;
   readonly traceId: string;
   readonly spanId: string;
-  readonly finished: Promise<CommandResult>;
+  readonly finished: Promise<OperationResult>;
 }

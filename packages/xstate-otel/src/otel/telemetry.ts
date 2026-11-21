@@ -23,7 +23,7 @@ import type {
 } from '../core/telemetry.js';
 import type { SendCommandOptions, TracedWorkOptions, XStateTracingOptions } from '../types.js';
 import { actorId } from '../xstate/actors.js';
-import { getAttributeKeys, type AttributeKeys } from './attributes.js';
+import { getTelemetryNames, type TelemetryNames } from './attributes.js';
 
 interface FailureDetails {
   type?: string | undefined;
@@ -37,7 +37,7 @@ interface FailureDetails {
 export class OtelTelemetry implements TelemetryBackend<SendCommandOptions, TracedWorkOptions> {
   private readonly failedSpans = new WeakSet<Span>();
   /** Emitted names, resolved and validated once at construction. */
-  readonly keys: AttributeKeys;
+  readonly keys: TelemetryNames;
 
   private readonly tracer: Tracer;
   private readonly options: XStateTracingOptions;
@@ -47,7 +47,7 @@ export class OtelTelemetry implements TelemetryBackend<SendCommandOptions, Trace
     this.tracer = tracer;
     this.options = options;
     this.diagnostics = diagnostics;
-    this.keys = getAttributeKeys(options.attributeNamespace);
+    this.keys = getTelemetryNames(options.telemetryNamespace);
   }
 
   get recordsMicrosteps(): boolean {
@@ -60,13 +60,13 @@ export class OtelTelemetry implements TelemetryBackend<SendCommandOptions, Trace
     }
     const parentContext = trace.setSpanContext(ROOT_CONTEXT, start.origin as SpanContext);
     return this.startCommand(start.actor, start.event, {
-      name: start.name ?? this.keys.scheduledSpan,
+      name: start.name ?? this.keys.timerOperationSpan,
       relationship: 'link',
       parentContext,
       attributes: {
-        [this.keys.scheduledAction]: start.actionType,
-        [this.keys.scheduledDelayMs]: start.delayMs,
-        [this.keys.scheduledOriginOperationId]: start.originOperationId,
+        [this.keys.timerAction]: start.actionType,
+        [this.keys.timerDelayMs]: start.delayMs,
+        [this.keys.timerOriginOperationId]: start.originOperationId,
       },
     });
   }
@@ -94,7 +94,7 @@ export class OtelTelemetry implements TelemetryBackend<SendCommandOptions, Trace
             {},
           ),
           ...options.attributes,
-          [this.keys.commandEvent]: event.type,
+          [this.keys.operationEventType]: event.type,
         },
         links: [...automaticLink, ...(options.links ?? [])],
       },

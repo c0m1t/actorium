@@ -18,7 +18,7 @@ import {
   type RequiredActorOptionsKeys,
 } from 'xstate';
 import { afterAll, beforeAll, beforeEach, expect, vi } from 'vitest';
-import type { CommandResult } from '../src/index.js';
+import type { OperationResult } from '../src/index.js';
 
 /**
  * A tracer that records to memory for the test file that calls this at module
@@ -103,7 +103,7 @@ export function expectStoppedActorWarnings<T>(
   }
 }
 
-// Waiting in tests: prefer `await command.finished`, `await tracing.settle()`
+// Waiting in tests: prefer `await command.finished`, `await tracing.waitForBookkeeping()`
 // or XState's `waitFor(actor, predicate)`, then assert. Poll with
 // `vi.waitFor(() => expect(...))` only for work tracing cannot await (a
 // Promise settling outside an operation, a real timer), and say why there.
@@ -126,25 +126,25 @@ export function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-/** A recorded delivery, as the runtime keeps it in `processing` and `queued`. */
-export interface DeliveryRecord {
+/** A mirrored mailbox entry, as the runtime keeps it in `processing` and `queued`. */
+export interface MirroredEntryRecord {
   event: AnyEventObject;
   operation:
-    | { id: number; pendingDeliveries: number; ended: boolean; finished: Promise<CommandResult> }
+    | { id: number; pendingEventCount: number; ended: boolean; finished: Promise<OperationResult> }
     | undefined;
 }
 
 /**
  * The private state tests inspect, named as in OperationRuntime
- * (core/runtime.ts) and ScheduledWork (core/scheduled-work.ts). Keyed tables
+ * (core/runtime.ts) and TimerIntegration (core/timers.ts). Keyed tables
  * use `object` keys so tests can pass any actor reference.
  */
 export interface RuntimeInternals {
-  processing: WeakMap<object, DeliveryRecord>;
-  queued: WeakMap<object, Iterable<DeliveryRecord> & { readonly length: number }>;
+  processing: WeakMap<object, MirroredEntryRecord>;
+  queued: WeakMap<object, Iterable<MirroredEntryRecord> & { readonly length: number }>;
   pendingCommands: WeakMap<object, unknown>;
   actorOperations: WeakMap<object, unknown>;
-  actorContinuations: WeakMap<object, unknown>;
+  actorWorkRegistrations: WeakMap<object, unknown>;
   observedActors: WeakSet<object>;
   rootActors: WeakSet<object>;
   lifecycleChecks: WeakSet<object>;
@@ -152,8 +152,8 @@ export interface RuntimeInternals {
   activeBookkeeping: unknown;
   scheduleBookkeeping(callback: () => void): void;
   instrumentedSystems: WeakSet<object>;
-  scheduledRegistrations: WeakMap<object, WeakMap<object, unknown>>;
-  scheduledByActor: WeakMap<object, Set<object>>;
+  timerRegistrations: WeakMap<object, WeakMap<object, unknown>>;
+  timersByActor: WeakMap<object, Set<object>>;
 }
 
 /** Tables that hold per-actor work; all must be empty once that work is over. */
@@ -162,9 +162,9 @@ const perActorTables = [
   'queued',
   'pendingCommands',
   'actorOperations',
-  'actorContinuations',
-  'scheduledByActor',
-  'scheduledRegistrations',
+  'actorWorkRegistrations',
+  'timersByActor',
+  'timerRegistrations',
 ] as const;
 
 /** Asserts that the runtime retains no work for these actors. */
@@ -176,13 +176,13 @@ export function expectReleased(tracing: object, ...actors: AnyActorRef[]): void 
 
 /**
  * White-box view of the lifecycle runtime behind an XStateTracing instance:
- * its private tables and methods, plus the scheduled-work tables, by name.
+ * its private tables and methods, plus the timer tables, by name.
  */
 export function internals(tracing: object): RuntimeInternals {
-  const runtime = (tracing as { runtime: object & { scheduledWork: object } }).runtime;
+  const runtime = (tracing as { runtime: object & { timers: object } }).runtime;
   const view = new Proxy(runtime, {
     get(target, key) {
-      const source = key in target ? target : target.scheduledWork;
+      const source = key in target ? target : target.timers;
       const value: unknown = Reflect.get(source, key);
       return typeof value === 'function' ? value.bind(source) : value;
     },

@@ -134,7 +134,7 @@ export function createCheckoutMachine(tracing: XStateTracing, services: Checkout
       },
 
       // Passive waiting state: no special telemetry annotation is needed. Since
-      // there is no finite continuation after the product onDone macrostep, the
+      // no traced Promise actor is registered after the product onDone macrostep, the
       // current operation ends automatically.
       waitingForRescan: {
         on: {

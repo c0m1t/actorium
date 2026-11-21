@@ -1,20 +1,20 @@
 export { XStateTracing, createXStateTracing } from './otel/xstate-tracing.js';
-export { getAttributeKeys, DEFAULT_ATTRIBUTE_NAMESPACE } from './otel/attributes.js';
-export type { AttributeKeys } from './otel/attributes.js';
+export { getTelemetryNames, DEFAULT_TELEMETRY_NAMESPACE } from './otel/attributes.js';
+export type { TelemetryNames } from './otel/attributes.js';
 
 export type {
   CommandEvent,
-  CommandOutcome,
-  CommandResult,
-  CommandTrace,
   CreateXStateTracingOptions,
   ErrorDetails,
   FromPromiseOptions,
+  OperationOutcome,
+  OperationResult,
+  OperationTrace,
   PromiseActorArgs,
-  ScheduledWorkPolicy,
-  ScheduledWorkPolicyArgs,
   SendCommandOptions,
   ShouldTraceArgs,
   TelemetryDiagnostic,
+  TimerPolicy,
+  TimerPolicyArgs,
   XStateTracingOptions,
 } from './types.js';

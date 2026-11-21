@@ -1,5 +1,5 @@
 import type { ActorRefLike, AnyActorRef, AnyEventObject } from 'xstate';
-import type { CommandOutcome, ScheduledWorkPolicyArgs } from './types.js';
+import type { OperationOutcome, TimerPolicyArgs } from './types.js';
 
 // The internal boundary between lifecycle bookkeeping and a telemetry backend.
 // The runtime decides when operations and work start, fail and end; a backend
@@ -16,13 +16,13 @@ export type OperationStart<TCommandOptions> =
       readonly options: TCommandOptions;
     }
   | {
-      readonly cause: 'scheduled';
+      readonly cause: 'timer';
       readonly actor: AnyActorRef;
       readonly event: AnyEventObject;
       readonly name: string | undefined;
       readonly origin: TelemetryLink;
       readonly originOperationId: number;
-      readonly actionType: ScheduledWorkPolicyArgs['actionType'];
+      readonly actionType: TimerPolicyArgs['actionType'];
       readonly delayMs: number;
     };
 
@@ -36,7 +36,7 @@ export type UnobservedReason = 'target_not_observed' | 'send_not_observed';
 export type OutcomeReason = TerminalReason | UnobservedReason;
 
 export interface OperationSummary {
-  readonly outcome: CommandOutcome;
+  readonly outcome: OperationOutcome;
   readonly outcomeReason: OutcomeReason | undefined;
   readonly hadError: boolean;
   readonly errorCount: number;

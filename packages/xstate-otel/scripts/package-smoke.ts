@@ -5,7 +5,11 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
-import { createXStateTracing, getAttributeKeys, type CommandResult } from '@actorium/xstate-otel';
+import {
+  createXStateTracing,
+  getTelemetryNames,
+  type OperationResult,
+} from '@actorium/xstate-otel';
 import manifest from '@actorium/xstate-otel/package.json' with { type: 'json' };
 import { createActor, setup } from 'xstate';
 
@@ -33,8 +37,8 @@ export function rejectsUnknownEvents(): void {
 }
 
 const command = tracing.sendCommand(actor, { type: 'RUN' }, { name: 'smoke.run' });
-const result: CommandResult = await command.finished;
-await tracing.settle();
+const result: OperationResult = await command.finished;
+await tracing.waitForBookkeeping();
 
 assert.deepEqual(result, { outcome: 'completed', hadError: false });
 const spans = exporter.getFinishedSpans();
@@ -42,5 +46,5 @@ assert.deepEqual(
   spans.map((span) => span.name),
   ['smoke.work', 'smoke.run'],
 );
-assert.equal(spans[1]?.attributes[getAttributeKeys().operationOutcome], 'completed');
+assert.equal(spans[1]?.attributes[getTelemetryNames().operationOutcome], 'completed');
 console.log(`${manifest.name}@${manifest.version}: tarball smoke test passed`);

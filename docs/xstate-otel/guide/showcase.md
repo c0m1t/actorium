@@ -48,6 +48,6 @@ page hides them until you turn on **Show microsteps**.
 ## Tests
 
 `tests/showcase.test.ts` starts the server, runs every scenario over HTTP and
-compares an outline of its span tree. The server calls `settle()` before it
+compares an outline of its span tree. The server calls `waitForBookkeeping()` before it
 ends the request span, so every operation has ended when the response
-arrives. It is a working example of [testing with `settle()`](../recipes/testing.md).
+arrives. It is a working example of [testing with `waitForBookkeeping()`](../recipes/testing.md).
