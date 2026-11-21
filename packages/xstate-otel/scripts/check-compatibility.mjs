@@ -22,11 +22,33 @@ const packageInputs = [
 const checks = ['typecheck', 'build', 'test'];
 const testSdk = '@opentelemetry/sdk-trace-base';
 
-// Peer floors, development pins and the newest release. `latest` is a range,
-// so it resolves to the newest version outside pnpm's minimumReleaseAge window.
+/** The exact version the workspace catalog pins for `name`. */
+async function catalogVersion(name) {
+  // Normalize line endings, as a Windows checkout may convert them to CRLF.
+  const workspace = (await readFile(join(root, 'pnpm-workspace.yaml'), 'utf8')).replaceAll(
+    '\r\n',
+    '\n',
+  );
+  const catalog = /^catalog:\n((?:[ \t]+.*\n)+)/m.exec(workspace)?.[1] ?? '';
+  const version = new RegExp(`^\\s+'?${name}'?:\\s*'?([^'\\s]+)`, 'm').exec(catalog)?.[1];
+  if (!version) throw new Error(`No catalog version for ${name} in pnpm-workspace.yaml`);
+  return version;
+}
+
+const { peerDependencies } = JSON.parse(
+  await readFile(join(root, packagePath, 'package.json'), 'utf8'),
+);
+
+// Peer floors, the development pin and the newest supported release. `latest`
+// is the peer range, so it resolves to the newest version inside it that is
+// outside pnpm's minimumReleaseAge window.
 const matrix = {
-  xstate: { '5.33.0': '5.33.0', '5.33.2': '5.33.2', latest: '5' },
-  '@opentelemetry/api': { '1.9.0': '1.9.0', latest: '1' },
+  xstate: {
+    '5.33.0': '5.33.0',
+    pinned: await catalogVersion('xstate'),
+    latest: peerDependencies.xstate,
+  },
+  '@opentelemetry/api': { '1.9.0': '1.9.0', latest: peerDependencies['@opentelemetry/api'] },
 };
 
 function usage() {
@@ -87,8 +109,9 @@ async function installed(packageRoot, row) {
     ['xstate', row.xstate],
     ['@opentelemetry/api', row.api],
   ]) {
-    if (label !== 'latest' && versions[name] !== label) {
-      throw new Error(`Expected ${name} ${label}, found ${versions[name]}`);
+    const expected = matrix[name][label];
+    if (label !== 'latest' && versions[name] !== expected) {
+      throw new Error(`Expected ${name} ${expected}, found ${versions[name]}`);
     }
   }
   // The test SDK is a dependency of the disposable workspace, not of this one.
