@@ -29,9 +29,9 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
-    "knip": "6.44.2",
-    "oxfmt": "0.74.0",
-    "oxlint": "1.89.0",
+    "knip": "6.46.0",
+    "oxfmt": "0.79.0",
+    "oxlint": "1.94.0",
     "publint": "0.3.25"
   }
 }
